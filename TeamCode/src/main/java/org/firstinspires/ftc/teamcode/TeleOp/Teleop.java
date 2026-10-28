@@ -156,7 +156,7 @@ public class Teleop extends OpMode {
         }
         if (gamepad1.bWasPressed()) {
             if (flag2) {
-                shooter.setPower(0.5);
+                shooter.setPower(1);
             } else {
                 shooter.setPower(0);
             }
