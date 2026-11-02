@@ -1,5 +1,7 @@
 package org.firstinspires.ftc.teamcode.Autos;
 
+import com.pedropathing.math.Pose;
+import com.pedropathing.revhub.localizers.PinpointLocalizer;
 import com.qualcomm.hardware.dfrobot.HuskyLens;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
@@ -19,7 +21,10 @@ import com.skeletonarmy.marrow.BulkCaching;
                 turn to keep it centered and drive toward it.
                 When the ball is close (in the INTAKE ZONE) the intake turns ON.
     3. GRAB   : ball is right at the intake (or just went under the camera) ->
-                intake ON and creep forward for INTAKE_TIME seconds, then go back to SEARCH
+                intake ON and creep forward GRAB_DISTANCE inches (measured with the Pinpoint),
+                keep the intake on a moment longer, then go back to SEARCH
+    (Why the grab is "blind": the robot's front plate blocks the bottom of the camera picture, so the
+     ball disappears before it reaches the intake. See docs/INTAKE_NOTES.md.)
 
   Uses the same motor/intake names and directions as "Pollen Collector (P)".
   If it turns the WRONG way, flip TURN_SIGN. Drives the wrong way: FORWARD_SIGN.
@@ -54,8 +59,10 @@ public class PollenFollower extends LinearOpMode {
     private static final int    INTAKE_ZONE_Y     = 170;  // its center is this low on the screen (0 top .. 240 bottom)
     private static final int    CLOSE_WIDTH       = 90;   // box this wide = ball is right at the intake -> GRAB
     private static final double GRAB_FORWARD      = 0.3;  // forward power while driving over the ball
-    private static final double INTAKE_TIME       = 1.5;  // seconds to intake + creep forward
-    private static final double INTAKE_SETTLE     = 0.3;  // extra seconds of intake (standing still) to pull it in
+    private static final double GRAB_DISTANCE     = 12.0; // inches to creep forward with the intake on
+                                                          //   (~4-6 in to reach the rollers + 6-8 in into the channel)
+    private static final double GRAB_TIMEOUT      = 2.0;  // safety: stop creeping after this many seconds (stuck?)
+    private static final double INTAKE_SETTLE     = 0.5;  // extra seconds of intake (standing still) to pull it in
 
     // ---------- Locking onto ONE ball ----------
     private static final int    LOCK_JUMP_PX = 70;        // a box further than this from the locked ball = a DIFFERENT ball
@@ -74,6 +81,7 @@ public class PollenFollower extends LinearOpMode {
     private DcMotor fl, fr, bl, br, intakemotor;
     private CRServo leftintake, rightintake;
     private HuskyLens huskyLens;
+    private PinpointLocalizer localizer;        // only used to measure how far the grab has driven
 
     private enum State { SEARCH, CHASE, GRAB }
     private State state = State.SEARCH;
@@ -86,6 +94,7 @@ public class PollenFollower extends LinearOpMode {
     private int collected = 0;
     private String status = "Waiting";
     private double lastForward = 0, lastTurn = 0;
+    private double lastGrabDist = 0, lastGrabTime = 0;   // how far / how long the last grab drove (for tuning)
 
     @Override
     public void runOpMode() {
@@ -106,6 +115,8 @@ public class PollenFollower extends LinearOpMode {
         leftintake.setDirection(PollenCollector.LEFT_INTAKE_DIR);
         rightintake.setDirection(PollenCollector.RIGHT_INTAKE_DIR);
 
+        localizer = new PinpointLocalizer(hardwareMap, PollenCollector.PINPOINT);   // same Pinpoint settings as the collector
+
         huskyLens = hardwareMap.get(HuskyLens.class, "husylens");   // your Driver Hub spelling
         boolean found = huskyLens.knock();
         huskyLens.selectAlgorithm(HuskyLens.Algorithm.COLOR_RECOGNITION);
@@ -116,6 +127,7 @@ public class PollenFollower extends LinearOpMode {
         waitForStart();
 
         while (opModeIsActive()) {
+            localizer.update();
             HuskyLens.Block ball = findTarget();
 
             switch (state) {
@@ -191,16 +203,23 @@ public class PollenFollower extends LinearOpMode {
         drive(forward * FORWARD_SIGN, turn);
     }
 
-    /** Intake ON and creep forward over the ball, then let the intake finish pulling it in. */
+    /** Intake ON and creep GRAB_DISTANCE inches over the ball, then let the intake finish pulling it in. */
     private void grab() {
-        status = "GRABBING - intake on";
         intakeOn();
+        localizer.update();
+        Pose start = localizer.pose();
         ElapsedTime t = new ElapsedTime();
-        while (opModeIsActive() && t.seconds() < INTAKE_TIME) {
+        while (opModeIsActive() && t.seconds() < GRAB_TIMEOUT) {
+            localizer.update();
+            Pose now = localizer.pose();
+            lastGrabDist = Math.hypot(now.x() - start.x(), now.y() - start.y());
+            if (lastGrabDist >= GRAB_DISTANCE) break;
+            status = String.format("GRABBING - intake on, %.1f / %.0f in", lastGrabDist, GRAB_DISTANCE);
             drive(GRAB_FORWARD * FORWARD_SIGN, 0);
             show();
         }
         drive(0, 0);
+        lastGrabTime = t.seconds();
         t.reset();
         while (opModeIsActive() && t.seconds() < INTAKE_SETTLE) idle();
         intakeOff();
@@ -266,6 +285,8 @@ public class PollenFollower extends LinearOpMode {
         telemetry.addData("State", state);
         telemetry.addData("Status", status);
         telemetry.addData("Collected", collected);
+        telemetry.addData("Last grab", "%.1f in (want %.0f)  %.1f s (timeout %.0f)",
+                lastGrabDist, GRAB_DISTANCE, lastGrabTime, GRAB_TIMEOUT);
         if (target != null) {
             telemetry.addData("Ball box", "x %d (center %d)  y %d  w %d  (intake zone: w>=%d or y>=%d, grab at w>=%d)",
                     target.x, SCREEN_W / 2, target.y, target.width, INTAKE_ZONE_WIDTH, INTAKE_ZONE_Y, CLOSE_WIDTH);

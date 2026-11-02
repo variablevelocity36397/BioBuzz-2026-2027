@@ -54,3 +54,10 @@ Motor/intake directions are shared constants in `Autos/PollenCollector.java` (`F
 `~/StudioProjects/virtual_robot` (Beta8397 virtual_robot, JDK = liberica-full-17). OpModes
 "Pollen Follower SIM" and "Pollen Collector SIM" in `TeamCode/src/org/firstinspires/ftc/teamcode/`.
 Fake pollen, no real camera. Before each run re-pick "Mecanum Bot" so the robot resets to the center.
+
+## Intake — how far / how long (READ THIS for intake work)
+See **`docs/INTAKE_NOTES.md`** and the photos in **`docs/photos/`**
+(`huskylens-camera-view.png` = what the HuskyLens sees from the robot; `robot-holding-pollen-topdown.png`
+= the robot holding a ball). Short version: the ball disappears under the camera before reaching the intake,
+so turn the intake on early and finish the pickup blind; drive ~12 in forward after it vanishes
+(Pinpoint distance, 2 s safety timeout), then keep the intake on ~0.5 s. Measure and fill in the numbers in the notes.
