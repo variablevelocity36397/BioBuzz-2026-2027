@@ -23,7 +23,7 @@ public class RedAuto extends OpMode {
 
     // bezier control points, named after the path they shape
     private final Pose startToGardenControl1 = poseFactory.of(54.8366, 26.9209, 0);
-    private final Pose startToGardenControl2 = poseFactory.of(24.7417, 9, 0);
+    private final Pose startToGardenControl2 = poseFactory.of(24.7417, 5.478162650602418, 0);
     private final Pose gardenToFarShootControl1 = poseFactory.of(23.1216, 77.5227, 0);
     private final Pose gardenToFarShootControl2 = poseFactory.of(32.9209, 107.3735, 0);
     private final Pose gardenToFarShootControl3 = poseFactory.of(53.445, 118.2613, 0);

@@ -48,32 +48,54 @@ public class LimeLightCamera {
         return latest != null && latest.isValid();
     }
 
-    // tx to aim at, or Double.NaN if none of our tags are visible
-    public double getTargetTx() {
+    // {tx, ty} of the CELL to aim at, or null if none of our tags are visible
+    private double[] getTargetCell() {
         if (targetCells == null || !resultValid()) {
-            return Double.NaN;
+            return null;
         }
 
-        double best = Double.NaN;
+        double[] best = null;
         for (int[] cell : targetCells) {
-            double sum = 0;
+            double sumX = 0;
+            double sumY = 0;
             int count = 0;
             for (LLResultTypes.FiducialResult tag : latest.getFiducialResults()) {
                 int id = tag.getFiducialId();
                 if (id == cell[0] || id == cell[1]) {
-                    sum += tag.getTargetXDegrees();
+                    sumX += tag.getTargetXDegrees();
+                    sumY += tag.getTargetYDegrees();
                     count++;
                 }
             }
             if (count > 0) {
-                double cellTx = sum / count;  // 2 seen -> average (CELL center), 1 seen -> that tag's tx
+                // 2 seen -> average (CELL center), 1 seen -> that tag's tx/ty
+                double cellTx = sumX / count;
+                double cellTy = sumY / count;
                 // if both CELLs are visible, use the one closest to the crosshair
-                if (Double.isNaN(best) || Math.abs(cellTx) < Math.abs(best)) {
-                    best = cellTx;
+                if (best == null || Math.abs(cellTx) < Math.abs(best[0])) {
+                    best = new double[] {cellTx, cellTy};
                 }
             }
         }
         return best;
+    }
+
+    // tx to aim at, or Double.NaN if none of our tags are visible
+    public double getTargetTx() {
+        double[] cell = getTargetCell();
+        if (cell == null) {
+            return Double.NaN;
+        }
+        return cell[0];
+    }
+
+    // ty of our CELL (goes down as we drive away), or Double.NaN if none of our tags are visible
+    public double getTargetTy() {
+        double[] cell = getTargetCell();
+        if (cell == null) {
+            return Double.NaN;
+        }
+        return cell[1];
     }
 
     public boolean hasTarget() {
@@ -112,6 +134,7 @@ public class LimeLightCamera {
             telemetry.addData("LL staleness ms", latest.getStaleness());
         }
         telemetry.addData("LL tag IDs seen", getVisibleTagIds());
+        telemetry.addData("LL target ty", getTargetTy());
     }
 
     public void stop() {

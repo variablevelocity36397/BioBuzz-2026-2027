@@ -13,6 +13,8 @@ import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 import org.firstinspires.ftc.teamcode.Vision.LimeLightCamera;
 import org.firstinspires.ftc.teamcode.Vision.PedroAlign;
+import java.util.ArrayList;
+import java.util.List;
 
 @Autonomous(name = "Basic State Test")
 public class basic extends OpMode {
@@ -35,6 +37,11 @@ public class basic extends OpMode {
     private static final long SCORE_TIME = 2000;
     private static final long COLLECT_TIME = 1500;
     private static final long PARK_TIME = 27000;
+    private static final double TILE = 24;            // inches per field tile
+    private static final double PARK_LEFT = 1.5 * TILE; // park: strafe 1.5 tiles to the robot's left...
+    private static final double PARK_FORWARD = 5;       // ...after going forward this many inches
+    // park legs still to drive, followed one at a time so each move finishes before the next starts
+    private final List<Path> parkLegs = new ArrayList<>();
     private long autoStartTime;
     private long stateStartTime;
     enum AutoState {
@@ -51,7 +58,7 @@ public class basic extends OpMode {
         follower = Constants.create(hardwareMap);
         follower.setPose(startPose);
         buildPath();
-        currentState = AutoState.DRIVETOSCORE;
+        currentState = AutoState.PARK;
         shooter = hardwareMap.get(DcMotor.class, "shooter");
         intake = hardwareMap.get(DcMotor.class, "intakemotor");
         rightintake = hardwareMap.get(CRServo.class, "rightintake");
@@ -85,7 +92,9 @@ public class basic extends OpMode {
     @Override
     public void start() {
         autoStartTime = System.currentTimeMillis();
-        enterState(AutoState.DRIVETOSCORE);
+        // park only for now: strafe 2 tiles left and stop. The score/align/pickup states below are kept
+        // for later; switch this back to AutoState.DRIVETOSCORE to run the full auto again
+        enterState(AutoState.PARK);
     }
 
     @Override
@@ -153,9 +162,14 @@ public class basic extends OpMode {
                 startCollect();
                 break;
             case PARK:
-                Pose currentPose = follower.pose();
-                ParkPath = line(currentPose, endPose).linear(currentPose, endPose);
-                follower.follow(ParkPath);
+                // forward 5 in, then strafe 1.5 tiles left, relative to the robot, heading unchanged
+                Pose p0 = follower.pose();
+                Pose p1 = offset(p0, PARK_FORWARD, 0);
+                Pose p2 = offset(p1, 0, PARK_LEFT);
+                parkLegs.clear();
+                parkLegs.add(line(p0, p1).constant(p1));
+                parkLegs.add(line(p1, p2).constant(p2));
+                follower.follow(parkLegs.remove(0));
                 stopAll();
                 break;
         }
@@ -220,7 +234,17 @@ public class basic extends OpMode {
         }
     }
     private void updatePark() {
-        //everything already stopped on entry
+        //everything already stopped on entry, just drive the remaining legs
+        if (!follower.isBusy() && !parkLegs.isEmpty()) {
+            follower.follow(parkLegs.remove(0));
+        }
+    }
+
+    // pose moved relative to the robot: +forward along its heading, +left to its left (-sin h, cos h)
+    private Pose offset(Pose p, double forward, double left) {
+        double h = p.heading();
+        return new Pose(p.x() + forward * Math.cos(h) - left * Math.sin(h),
+                p.y() + forward * Math.sin(h) + left * Math.cos(h), h);
     }
 
     private void stopScoring() {
