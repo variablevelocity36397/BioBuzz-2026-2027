@@ -33,12 +33,24 @@ Photos (in `docs/photos/`):
 - Intake run time that reliably pulls a ball all the way in from touching: ____ s
 
 ## Status of the code (as of this note)
-- `Autos/PollenFollower.java` now **finds, chases and intakes** pollen: spins to search when no ball is seen,
-  locks onto one ball (`LOCK_JUMP_PX = 70`), turns the intake on in the intake zone (`INTAKE_ZONE_WIDTH = 45` /
-  `INTAKE_ZONE_Y = 170`), and when the ball vanishes while close (or reaches `CLOSE_WIDTH = 90`) it creeps
-  **`GRAB_DISTANCE = 12` in by Pinpoint** at `GRAB_FORWARD = 0.3`, with a `GRAB_TIMEOUT = 2.0` s safety limit, then keeps
-  the intake on `INTAKE_SETTLE = 0.5` s. Telemetry "Last grab" shows the distance and time each grab actually drove.
+- `Autos/PollenFollower.java`: see "Done" below (merged version: spin search + one-ball lock + drive past + check/retry).
 - `Autos/PollenCollector.java` has the time-based intake (`INTAKE_TIME = 2.0` s, `GRAB_CREEP = 0.3`,
   intake zone `INTAKE_ZONE_WIDTH = 45` / `INTAKE_ZONE_Y = 170`, `CLOSE_WIDTH = 90`, and it finishes the grab
   if the ball vanishes while close). Next step suggested: switch the creep to a distance (`~12 in`) using the
   Pinpoint, with the 2 s timeout kept as a safety limit.
+
+## Test video, Nov 1 2026 (frames: `docs/photos/test-video-1-first-16s.jpg`, `test-video-2-next-16s.jpg`)
+- The follow-only version turned to face the ball and drove up to it, then **stopped at the ball and nudged it**.
+  The intake never ran (that version had no intake on purpose).
+- User wants: intake ON when close, **drive a little PAST the ball** so it's surely in, then **check** it's in,
+  and if not, **try again another way**.
+
+. No ball in view -> SPIN toward the side it was last seen (`SEARCH_TURN` = 0.35, flip `SEARCH_SIGN` if backwards),
+   after a `LOST_GRACE` = 0.4 s pause.
+1. LOCK ON to one ball (ignores boxes more than `LOCK_JUMP_PX` = 70 px from it), turn to face it and drive at it.
+2. Close (box w >= 45 or y >= 170) -> intake ON, keep driving at it (no more stopping in front).
+3. Ball vanishes under the camera while close -> drive `PASS_DISTANCE_IN` = 12 in past (wheel encoders,
+   312 rpm / 104 mm -> 0.0239 in/tick), keep intake on `INTAKE_EXTRA_TIME` = 0.5 s, 2.5 s safety timeout.
+4. Back up `BACKUP_IN` = 6 in and look for 0.6 s. A ball with box w >= `MISSED_WIDTH` (35) still in front = missed ->
+   strafe 3 in sideways (alternating sides) and re-approach with intake on; up to `MAX_RETRIES` = 2.
+Telemetry shows Collected / missed / retries and "Wheels moved" inches. Tune PASS_DISTANCE_IN first.

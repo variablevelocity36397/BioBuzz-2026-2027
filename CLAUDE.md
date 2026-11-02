@@ -28,8 +28,9 @@ Motor/intake directions are shared constants in `Autos/PollenCollector.java` (`F
 
 ## OpModes
 - **`Autos/PollenFollower.java` — "Pollen Follower"** (the one the user is testing now).
-  Follow-only, **no intake**. Turns to face the pollen (`TRACK_MODE = TURN`; `STRAFE` / `BOTH` available),
-  drives forward/back to hold distance (`FOLLOW_WIDTH` = 60 px ≈ 15 in), stops instantly when the ball is lost.
+  Follows AND intakes (`COLLECT = true`): turns to face the pollen (`TRACK_MODE = TURN`), intake on when close,
+  drives `PASS_DISTANCE_IN` (12 in, wheel encoders) past where the ball vanished, backs up to check, retries if missed.
+  `COLLECT = false` = follow only (holds `FOLLOW_WIDTH` distance, no intake). See docs/INTAKE_NOTES.md.
   Tuning: `KP_TURN`, `TURN_SIGN`, `STRAFE_SIGN`, `FORWARD_SIGN`, `SPEED` (0.5).
 - **`Autos/PollenCollector.java` — "Pollen Collector (P)"**: drives to field coordinates with a P controller
   (Pinpoint), slows down within `SLOW_DOWN_DIST` (24 in), searches for pollen, intakes it, goes to SCORE.
