@@ -1,13 +1,13 @@
-package org.firstinspires.ftc.teamcode.Localization;
+package org.firstinspires.ftc.teamcode.pedro;
 
 import com.pedropathing.revhub.drivetrains.Mecanum;
 import com.pedropathing.revhub.localizers.OTOSLocalizer;
 import com.pedropathing.tuning.autotune.Procedure;
 import com.pedropathing.tuning.autotune.Tuner;
 
-import org.firstinspires.ftc.teamcode.Localization.procedures.MecanumTuner;
-import org.firstinspires.ftc.teamcode.Localization.procedures.OTOSTuner;
-import org.firstinspires.ftc.teamcode.Localization.procedures.Tests;
+import org.firstinspires.ftc.teamcode.pedro.procedures.MecanumTuner;
+import org.firstinspires.ftc.teamcode.pedro.procedures.OTOSTuner;
+import org.firstinspires.ftc.teamcode.pedro.procedures.Tests;
 
 public class Tuning {
     @Tuner
