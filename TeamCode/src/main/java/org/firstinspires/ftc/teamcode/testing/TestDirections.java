@@ -8,7 +8,7 @@ import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.ServoImplEx;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
-import org.firstinspires.ftc.teamcode.subsytems.Turret;
+import org.firstinspires.ftc.teamcode.subsytems.TurretPos;
 
 import java.util.Arrays;
 import java.util.List;
@@ -35,13 +35,14 @@ public class TestDirections extends OpMode {
     // Other position servos, read only (never moved here)
     private Servo adjustableIntake;
     private String expected = "-";
+    private double adjustablePos = 0.5;
 
     @Override
     public void init() {
 
         left = hardwareMap.get(ServoImplEx.class, "turretleft");
         right = hardwareMap.get(ServoImplEx.class, "turretright");
-        Turret.applyDirections(left, right);
+        TurretPos.applyDirections(left, right);
         left.setPwmDisable();
         right.setPwmDisable();
         adjustableIntake = hardwareMap.get(Servo.class, "adjustableintake");
@@ -66,6 +67,15 @@ public class TestDirections extends OpMode {
         if (gamepad1.rightBumperWasPressed()) move(turretDeg - step);
         if (gamepad1.dpadDownWasPressed()) move(0);
 
+        if (gamepad1.dpadLeftWasPressed()) {
+            adjustablePos = adjustablePos - 0.05;
+        }
+        if (gamepad1.dpadRightWasPressed()) {
+            adjustablePos = adjustablePos + 0.05;
+        }
+
+        adjustableIntake.setPosition(adjustablePos);
+
         telemetry.addLine();
         telemetry.addData("Left bumper", "turret LEFT one step");
         telemetry.addData("Right bumper", "turret RIGHT one step");
@@ -75,10 +85,11 @@ public class TestDirections extends OpMode {
         telemetry.addData("Turret should", expected);
         telemetry.addLine();
         telemetry.addLine("Servo positions (last commanded, NaN = never set this run)");
+        telemetry.addData("adjustable pos: ", adjustablePos);
         telemetry.addData("turretleft", "%.3f (%s)", left.getPosition(), pwm(left));
         telemetry.addData("turretright", "%.3f (%s)", right.getPosition(), pwm(right));
         telemetry.addData("Turret center / limits", "%.3f / %.3f to %.3f",
-                Turret.servoPosition(0), Turret.servoPosition(Turret.MIN_DEG), Turret.servoPosition(Turret.MAX_DEG));
+                TurretPos.servoPosition(0), TurretPos.servoPosition(TurretPos.MIN_DEG), TurretPos.servoPosition(TurretPos.MAX_DEG));
         telemetry.addData("adjustableintake", "%.3f", adjustableIntake.getPosition());
         telemetry.addData("Cur left ServoPos", curTurretPos);
         telemetry.addData("Cur Right ServoPos", curTurretPos2);
@@ -92,11 +103,11 @@ public class TestDirections extends OpMode {
 
     // Both servos to the same angle, clamped to the turret soft limits.
     private void move(double deg) {
-        turretDeg = Math.max(Turret.MIN_DEG, Math.min(Turret.MAX_DEG, deg));
+        turretDeg = Math.max(TurretPos.MIN_DEG, Math.min(TurretPos.MAX_DEG, deg));
         left.setPwmEnable();
         right.setPwmEnable();
-        left.setPosition(Turret.servoPosition(turretDeg));
-        right.setPosition(Turret.servoPosition(turretDeg));
+        left.setPosition(TurretPos.servoPosition(turretDeg));
+        right.setPosition(TurretPos.servoPosition(turretDeg));
         expected = turretDeg == 0 ? "be at CENTER" : String.format("be %.0f deg %s", Math.abs(turretDeg), turretDeg > 0 ? "LEFT" : "RIGHT");
     }
 }

@@ -7,22 +7,22 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
-import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.teamcode.subsytems.MecanumDrive;
 import org.firstinspires.ftc.teamcode.subsytems.MotorToggle;
+import org.firstinspires.ftc.teamcode.subsytems.ServoToggle;
 import org.firstinspires.ftc.teamcode.subsytems.Shooter;
-import org.firstinspires.ftc.teamcode.subsytems.Turret;
+import org.firstinspires.ftc.teamcode.subsytems.TurretPos;
 
 @TeleOp(name = "TeleOp", group = "TeleOp")
 public class Teleop extends OpMode {
-    // Placeholder starting servo position, tune on the robot
-    private static final double ADJUSTABLE_INTAKE_START = 0.45;
-    private static final double ADJUSTABLE_INTAKE_STEP = 0.05;
+    // Start position, and the placeholder second position to tune on the robot
+    private static final double ADJUSTABLE_INTAKE_START = 0.85;
+    private static final double ADJUSTABLE_INTAKE_ALT = 0.45;
 
     private static final double SLOW_SPEED = 0.2;
     private static final double TURN_SCALE = 0.8;
-    private static final double SHOOTER_VELOCITY = 1090;
+    private static final double SHOOTER_VELOCITY = 1100;
     private static final double SPIN_UP_TOLERANCE = 12.5;
 
     private MecanumDrive drive;
@@ -32,9 +32,8 @@ public class Teleop extends OpMode {
     private MotorToggle intake1;
     private MotorToggle intake2;
     private MotorToggle transfer;
-    private Servo adjustableIntake;
-    private double adjustableIntakePos = ADJUSTABLE_INTAKE_START;
-    //private Turret turret;
+    private ServoToggle adjustableIntake;
+    //private TurretPos turret;
     private boolean aimOn;
 
     @Override
@@ -49,10 +48,12 @@ public class Teleop extends OpMode {
         intake2 = new MotorToggle(hardwareMap.get(DcMotor.class, "intake2"));
         DcMotor transferMotor = hardwareMap.get(DcMotor.class, "transfer");
         transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        transfer = new MotorToggle(transferMotor, 0.75);
-        // Not commanded here so the servo stays still during init
-        adjustableIntake = hardwareMap.get(Servo.class, "adjustableintake");
-        //turret = new Turret(hardwareMap);
+        transfer = new MotorToggle(transferMotor, 0.73);
+        // Moves to the start position during init
+        adjustableIntake = new ServoToggle(hardwareMap.get(Servo.class, "adjustableintake"),
+                ADJUSTABLE_INTAKE_START, ADJUSTABLE_INTAKE_ALT);
+        adjustableIntake.update();
+        //turret = new TurretPos(hardwareMap);
     }
 
     @Override
@@ -73,14 +74,7 @@ public class Teleop extends OpMode {
             intake2.set(intake1.isOn());
         }
         if (gamepad1.xWasPressed()) transfer.toggle();
-        // Servo is only commanded on a press, so it doesn't jump on start
-        boolean servoUp = gamepad1.rightBumperWasPressed();
-        boolean servoDown = gamepad1.leftBumperWasPressed();
-        if (servoUp || servoDown) {
-            adjustableIntakePos = Range.clip(adjustableIntakePos
-                    + (servoUp ? ADJUSTABLE_INTAKE_STEP : -ADJUSTABLE_INTAKE_STEP), 0, 1);
-            adjustableIntake.setPosition(adjustableIntakePos);
-        }
+        if (gamepad1.rightBumperWasPressed()) adjustableIntake.toggle();
         if (gamepad1.dpadLeftWasPressed()) aimOn = !aimOn;
 
         // Turret only moves while auto aim is toggled on
@@ -90,6 +84,7 @@ public class Teleop extends OpMode {
         intake1.update();
         intake2.update();
         transfer.update();
+        adjustableIntake.update();
 
         double shooterError = shooter.getVelocity() - shooter.getActualVelocity();
         if (shooter.isOn() && spinUpTime < 0 && Math.abs(shooterError) < SPIN_UP_TOLERANCE) {
@@ -103,7 +98,7 @@ public class Teleop extends OpMode {
         telemetry.addData("Circle - intake1", intake1.isOn());
         telemetry.addData("Square - transfer", transfer.isOn());
         telemetry.addData("Circle - intake2", intake2.isOn());
-        telemetry.addData("R1/L1 - adjustable intake +/-", adjustableIntakePos);
+        telemetry.addData("R1 - adjustable intake", adjustableIntake.getPosition());
         telemetry.addData("Shooter target velocity", shooter.getVelocity());
         telemetry.addData("Shooter actual velocity", "%.1f", shooter.getActualVelocity());
         telemetry.addData("Shooter error", "%.1f", shooterError);

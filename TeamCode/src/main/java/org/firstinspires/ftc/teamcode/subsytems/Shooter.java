@@ -17,7 +17,7 @@ public class Shooter {
         this.step = step;
         motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
         motor.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
-        motor.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(170, 0, 0, 19.0520));
+        motor.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, new PIDFCoefficients(230, 0, 0, 17.4570));
     }
 
     public void toggle() { on = !on; }
