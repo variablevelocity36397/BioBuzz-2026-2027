@@ -14,20 +14,24 @@ Android Studio project; team code lives in `TeamCode/`. Build/deploy with ▶ Ru
   (`pedropathingquickstart`) and import `org.firstinspires.ftc.teamcode.pedro.Constants`, which doesn't exist here.
 - Explain things simply; the user is a student.
 
-## Driver Hub config ("Starter Bot") — names the code uses
-| Device | Name | Notes |
-|---|---|---|
-| Front left / front right / back left / back right motors | `fl`, `fr`, `bl`, `br` | mecanum; `bl` is port 3 on the hub with `fl` and `shooter` |
-| Intake motor | `intakemotor` | |
-| Intake CR servos | `leftintake`, `rightintake` | servo ports 0 and 4 |
-| Other | `shooter` (motor), `windmill` (CR servo) | not used by the pollen code yet |
-| Odometry | `pinpoint` | goBILDA Pinpoint, I2C |
-| Camera | `husylens` | HuskyLens, I2C. **Spelled without the k** to match the config. Color Recognition, pollen = ID 1 |
+## Driver Hub config — NEW: "BioBuzz Robot" (Nov 11 2026)
+All config names live in **`Autos/RobotNames.java`**. Each part has a list of names; the code uses the
+first one that exists, so both "BioBuzz Robot" and the old "Starter Bot" config work. Add new names there.
+| Hub | Port | Name | Used by pollen code? |
+|---|---|---|---|
+| Control Hub motor | 0 / 1 | `blwheel` / `flwheel` | yes (drive) |
+| motor | 2 | `transfer` | **yes** - runs WITH the intake (Nov 11, user asked), direction `TRANSFER_DIR` |
+| motor | 3 | `intake2` | yes (intake, direction `INTAKE2_DIR`) |
+| I2C | 1 | `husky lens` (with a space) | yes |
+| Expansion Hub servo | 0 / 1 / 2 | `turretleft` / `adjustableintake` / `hood` | no (position servos) |
+| ? | ? | front right / back right wheels — expected `frwheel` / `brwheel` | **not confirmed yet** |
+| ? | ? | Pinpoint — expected `pinpoint` (only Pollen Collector uses it) | **not confirmed yet** |
+Old "Starter Bot" names (`fl fr bl br intakemotor leftintake rightintake husylens`) are still in the lists.
 
 Motor/intake directions are shared constants in `Autos/PollenCollector.java` (`FL_DIR`, `LEFT_INTAKE_DIR`, ...).
 
 ## OpModes
-- **`Autos/PollenFollower.java` — "Pollen Follower"** (the one the user is testing now).
+- **`Autos/PollenFollower.java` — "Pollen Follower"** (Nov 11: `COLLECT = true` - chase + intake) **`SWEEP = true`** (Nov 11): user wants: drive to ball (intake off), when close intake ON, roll 6 in forward, stop 0.5 s with intake on, intake off, then search for the next ball. No back-up/check. `SWEEP = false` = old pass/back-up/check/retry. Also: SPEED 0.7, SEARCH_TURN 0.25, MAX_TURN 0.45, KP_TURN 0.005, APPROACH_POWER 0.65, 0.25 s stop when a ball is first spotted (skipped while sweeping). Intake dirs: INTAKE_MOTOR_DIR and INTAKE2_DIR both REVERSE (user said it was out-taking). (the one the user is testing now).
   Follows AND intakes (`COLLECT = true`): turns to face the pollen (`TRACK_MODE = TURN`), intake on when close,
   drives `PASS_DISTANCE_IN` (12 in, wheel encoders) past where the ball vanished, backs up to check, retries if missed.
   `COLLECT = false` = follow only (holds `FOLLOW_WIDTH` distance, no intake). See docs/INTAKE_NOTES.md.

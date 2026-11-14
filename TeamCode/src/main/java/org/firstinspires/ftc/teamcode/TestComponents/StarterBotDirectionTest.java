@@ -5,7 +5,11 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.firstinspires.ftc.teamcode.Autos.PollenCollector;
+import org.firstinspires.ftc.teamcode.Autos.RobotNames;
 
 /*
   StarterBot Direction Test
@@ -28,9 +32,8 @@ import org.firstinspires.ftc.teamcode.Autos.PollenCollector;
      -> If "turn" makes it slide sideways, or "forward" slides sideways, step 1 has a problem.
 
   3. INTAKE (hold):
-       Right bumper  = intakemotor only
-       Left bumper   = leftintake servo only
-       Right trigger = rightintake servo only
+       Right bumper  = 1st intake part   Left bumper = 2nd   Right trigger = 3rd
+       (the screen shows which names those are - from RobotNames.java)
        Left trigger  = EVERYTHING together (what the auto does)
      -> Each part should pull pollen IN. If one pushes OUT, flip its *_DIR.
 */
@@ -41,21 +44,19 @@ public class StarterBotDirectionTest extends LinearOpMode {
 
     @Override
     public void runOpMode() {
-        DcMotor fl = hardwareMap.get(DcMotor.class, "fl");
-        DcMotor fr = hardwareMap.get(DcMotor.class, "fr");
-        DcMotor bl = hardwareMap.get(DcMotor.class, "bl");
-        DcMotor br = hardwareMap.get(DcMotor.class, "br");
-        DcMotor intakemotor = hardwareMap.get(DcMotor.class, "intakemotor");
-        CRServo leftintake  = hardwareMap.get(CRServo.class, "leftintake");
-        CRServo rightintake = hardwareMap.get(CRServo.class, "rightintake");
+        DcMotor fl = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.FL, "front left wheel");
+        DcMotor fr = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.FR, "front right wheel");
+        DcMotor bl = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.BL, "back left wheel");
+        DcMotor br = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.BR, "back right wheel");
+        RobotNames.Intake intakeParts = new RobotNames.Intake(hardwareMap);
+        // RB = 1st intake part, LB = 2nd, RT = 3rd, LT = all of them (names shown on screen)
+        List<Object> parts = new ArrayList<>(intakeParts.motors);
+        parts.addAll(intakeParts.servos);
 
         fl.setDirection(PollenCollector.FL_DIR);
         fr.setDirection(PollenCollector.FR_DIR);
         bl.setDirection(PollenCollector.BL_DIR);
         br.setDirection(PollenCollector.BR_DIR);
-        intakemotor.setDirection(PollenCollector.INTAKE_MOTOR_DIR);
-        leftintake.setDirection(PollenCollector.LEFT_INTAKE_DIR);
-        rightintake.setDirection(PollenCollector.RIGHT_INTAKE_DIR);
 
         telemetry.addLine("Robot on BLOCKS. Press START.");
         telemetry.update();
@@ -81,19 +82,21 @@ public class StarterBotDirectionTest extends LinearOpMode {
 
             // 3. intake
             boolean all = gamepad1.left_trigger > 0.5;
-            intakemotor.setPower((gamepad1.right_bumper || all) ? 1 : 0);
-            leftintake.setPower((gamepad1.left_bumper || all) ? 1 : 0);
-            rightintake.setPower((gamepad1.right_trigger > 0.5 || all) ? 1 : 0);
-            if (gamepad1.right_bumper) doing = "intakemotor only - should pull IN";
-            if (gamepad1.left_bumper)  doing = "leftintake servo only - should pull IN";
-            if (gamepad1.right_trigger > 0.5) doing = "rightintake servo only - should pull IN";
+            boolean[] press = {gamepad1.right_bumper, gamepad1.left_bumper, gamepad1.right_trigger > 0.5};
+            for (int i = 0; i < parts.size(); i++) {
+                boolean on = all || (i < press.length && press[i]);
+                Object part = parts.get(i);
+                if (part instanceof DcMotor) ((DcMotor) part).setPower(on ? 1 : 0);
+                else ((CRServo) part).setPower(on ? 1 : 0);
+                if (i < press.length && press[i]) doing = intakeParts.names.get(i) + " only - should pull IN";
+            }
             if (all) doing = "WHOLE INTAKE - should pull pollen IN";
 
             telemetry.addData("Running", doing);
             telemetry.addLine();
             telemetry.addLine("Wheels:  X=fl  Y=fr  A=bl  B=br");
             telemetry.addLine("Drive:   Dpad up/down = fwd/back, left/right = turn");
-            telemetry.addLine("Intake:  RB=motor  LB=left servo  RT=right servo  LT=all");
+            telemetry.addData("Intake parts (RB, LB, RT; LT = all)", intakeParts.describe());
             telemetry.addLine("Wrong direction? Flip it in PollenCollector.java (*_DIR)");
             telemetry.update();
         }

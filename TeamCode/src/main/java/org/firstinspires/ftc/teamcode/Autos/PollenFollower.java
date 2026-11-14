@@ -33,15 +33,22 @@ import com.skeletonarmy.marrow.BulkCaching;
 @Autonomous(name = "Pollen Follower", group = "Pollen")
 public class PollenFollower extends LinearOpMode {
 
-    private static final boolean COLLECT = true;          // false = follow only, no intake
+    private static final boolean COLLECT = true;          // true = chase + INTAKE, false = chase only
+    // SWEEP = go to the ball, intake it, roll a few inches forward, then look for the next ball
+    // (no backing up to check). false = the careful way (pass, back up, check, retry).
+    private static final boolean SWEEP = true;
+    private static final double SWEEP_PASS_IN    = 6.0;   // after a ball vanishes under the camera, keep going this far
+    private static final double SWEEP_POWER      = 0.5;   // forward power for that pass
+    private static final double SWEEP_INTAKE_HOLD = 0.0;  // 0 = intake OFF while finding the next ball (raise to keep it on longer)
 
     // ---------- Speed ----------
-    private static final double SPEED = 0.5;              // multiplies every drive power (1.0 = full speed)
+    private static final double SPEED = 0.7;              // multiplies every drive power (1.0 = full speed)
 
     // ---------- Searching (no ball in view) ----------
-    private static final double SEARCH_TURN  = 0.35;      // spin power while looking for a ball
+    private static final double SEARCH_TURN  = 0.25;      // spin power while looking for a ball
     private static final double SEARCH_SIGN  = 1.0;       // -1.0 if it spins the opposite way you expect
     private static final double LOST_GRACE   = 0.4;       // seconds to wait after losing the ball before spinning
+    private static final double FOUND_STOP   = 0.25;      // seconds to STOP when it first spots a ball (kills the spin)
 
     // ---------- Locking onto ONE ball ----------
     private static final int    LOCK_JUMP_PX = 70;        // a box further than this from the locked ball = a DIFFERENT ball
@@ -49,8 +56,8 @@ public class PollenFollower extends LinearOpMode {
     // ---------- How it follows left/right movement ----------
     private enum Track { TURN, STRAFE, BOTH }
     private static final Track TRACK_MODE = Track.TURN;   // TURN = rotate to face the ball, STRAFE = slide, BOTH
-    private static final double KP_TURN      = 0.006;     // turn power per PIXEL the ball is off-center
-    private static final double MAX_TURN     = 0.6;
+    private static final double KP_TURN      = 0.005;     // turn power per PIXEL the ball is off-center
+    private static final double MAX_TURN     = 0.45;      // fastest it will turn while following
     private static final double TURN_SIGN    = 1.0;       // -1.0 if it turns AWAY from the ball
     private static final double KP_STRAFE    = 0.008;
     private static final double MAX_STRAFE   = 0.8;
@@ -58,8 +65,8 @@ public class PollenFollower extends LinearOpMode {
     private static final int    CENTER_DEADBAND = 12;     // pixels: this close to center counts as centered
 
     // ---------- Driving toward the ball ----------
-    private static final double APPROACH_POWER = 0.4;     // forward power when the ball is far
-    private static final double MIN_APPROACH   = 0.25;    // forward power when it's getting close
+    private static final double APPROACH_POWER = 0.65;    // forward power when the ball is far (was 0.4)
+    private static final double MIN_APPROACH   = 0.35;    // forward power when it's getting close (was 0.25)
     private static final double FORWARD_SIGN   = 1.0;     // -1.0 if it backs away when it should approach
 
     // ---------- Intake (tune with the "Ball box" telemetry) ----------
@@ -73,7 +80,7 @@ public class PollenFollower extends LinearOpMode {
 
     // ---------- Check + retry ----------
     private static final double BACKUP_IN   = 6.0;        // back up this far, then look for the ball
-    private static final double LOOK_TIME   = 0.6;        // seconds to look after backing up
+    private static final double LOOK_TIME   = 0.3;        // seconds to look after backing up
     private static final int    MISSED_WIDTH = 35;        // a ball this big right in front after backing up = we missed it
     private static final int    MAX_RETRIES = 2;
     private static final double RETRY_SHIFT_IN = 3.0;     // slide this far sideways before retrying
@@ -93,8 +100,8 @@ public class PollenFollower extends LinearOpMode {
     private static final int    MIN_BOX_PX = 10, MIN_Y = 60, CONFIRM_FRAMES = 2;
     private static final double MIN_ASPECT = 0.6, MAX_ASPECT = 1.6;
 
-    private DcMotor fl, fr, bl, br, intakemotor;
-    private CRServo leftintake, rightintake;
+    private DcMotor fl, fr, bl, br;
+    private RobotNames.Intake intakeParts;
     private HuskyLens huskyLens;
 
     private int seenFrames = 0, collected = 0, missed = 0, retries = 0;
@@ -105,14 +112,17 @@ public class PollenFollower extends LinearOpMode {
     private HuskyLens.Block lockedBall = null;  // the ONE ball we're chasing (null = not locked)
     private int lastSide = 1;                   // +1 = ball was last seen on the left, -1 = right (which way to spin)
     private final ElapsedTime lostTimer = new ElapsedTime();
+    private final ElapsedTime sweepTimer = new ElapsedTime();   // time since the last ball went in (SWEEP)
+    private boolean sweptOnce = false;
     private double lastFwd = 0, lastTurn = 0, lastRight = 0;
 
     @Override
     public void runOpMode() {
-        fl = hardwareMap.get(DcMotor.class, "fl");
-        fr = hardwareMap.get(DcMotor.class, "fr");
-        bl = hardwareMap.get(DcMotor.class, "bl");
-        br = hardwareMap.get(DcMotor.class, "br");
+        // Names come from RobotNames.java (works with "BioBuzz Robot" and the old "Starter Bot")
+        fl = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.FL, "front left wheel");
+        fr = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.FR, "front right wheel");
+        bl = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.BL, "back left wheel");
+        br = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.BR, "back right wheel");
         fl.setDirection(PollenCollector.FL_DIR);
         fr.setDirection(PollenCollector.FR_DIR);
         bl.setDirection(PollenCollector.BL_DIR);
@@ -123,18 +133,14 @@ public class PollenFollower extends LinearOpMode {
             m.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);   // we set power ourselves, but still read ticks
         }
 
-        intakemotor = hardwareMap.get(DcMotor.class, "intakemotor");
-        leftintake  = hardwareMap.get(CRServo.class, "leftintake");
-        rightintake = hardwareMap.get(CRServo.class, "rightintake");
-        intakemotor.setDirection(PollenCollector.INTAKE_MOTOR_DIR);
-        leftintake.setDirection(PollenCollector.LEFT_INTAKE_DIR);
-        rightintake.setDirection(PollenCollector.RIGHT_INTAKE_DIR);
+        intakeParts = new RobotNames.Intake(hardwareMap);   // every intake part in the config
 
-        huskyLens = hardwareMap.get(HuskyLens.class, "husylens");   // your Driver Hub spelling
+        huskyLens = RobotNames.need(hardwareMap, HuskyLens.class, RobotNames.HUSKY, "HuskyLens");
         boolean found = huskyLens.knock();
         huskyLens.selectAlgorithm(HuskyLens.Algorithm.COLOR_RECOGNITION);
 
-        telemetry.addData("HuskyLens", found ? "ready" : "NOT FOUND - check wiring / config name 'husylens'");
+        telemetry.addData("HuskyLens", found ? "ready" : "NOT FOUND - check wiring / config name 'husky lens'");
+        telemetry.addData("Intake parts", intakeParts.describe());
         telemetry.addData("Mode", COLLECT ? "follow + INTAKE" : "follow only");
         telemetry.update();
         waitForStart();
@@ -143,25 +149,39 @@ public class PollenFollower extends LinearOpMode {
             HuskyLens.Block ball = findPollen();
 
             if (ball == null) {
-                if (COLLECT && wasClose) {
+                if (COLLECT && wasClose && SWEEP) {
+                    // SWEEP: drive through it with the intake on, then go straight for the next ball
+                    wasClose = false;
+                    sweepThrough();
+                } else if (COLLECT && wasClose) {
                     // It slid under the camera right in front of the intake -> finish the pickup
                     wasClose = false;
                     pickUpAndCheck();
                 } else if (lockedBall != null && lostTimer.seconds() < LOST_GRACE) {
                     status = "Lost the ball - waiting a moment";
-                    intake(false);
+                    intake(sweeping());
                     drive(0, 0, 0);
                 } else {
                     // Nothing in view -> spin toward where we last saw a ball
                     lockedBall = null;
                     status = "Searching - spinning " + (lastSide > 0 ? "left" : "right");
-                    intake(false);
+                    intake(sweeping());
                     drive(0, SEARCH_TURN * lastSide * SEARCH_SIGN, 0);
                 }
                 show();
                 continue;
             }
 
+            if (lockedBall == null && !sweeping()) {
+                // Just spotted a ball after searching -> STOP first so the spin doesn't carry it past
+                lockedBall = ball;
+                status = "Found a ball - stopping";
+                drive(0, 0, 0);
+                show();
+                sleep((long) (FOUND_STOP * 1000));
+                lostTimer.reset();
+                continue;
+            }
             lockedBall = ball;                    // stay on THIS ball
             lostTimer.reset();
             int xErr = ball.x - SCREEN_W / 2;
@@ -183,7 +203,7 @@ public class PollenFollower extends LinearOpMode {
             } else {
                 status = "Following pollen";
                 wasClose = false;
-                intake(false);
+                intake(sweeping());   // intake only turns on when the ball is close
                 double closeness = Range.clip((double) ball.width / INTAKE_ZONE_WIDTH, 0, 1);
                 double fwd = MIN_APPROACH + (APPROACH_POWER - MIN_APPROACH) * (1 - closeness);
                 fwd *= 1.0 - 0.7 * Range.clip(Math.abs(xErr) / (SCREEN_W / 2.0), 0, 1);  // line up first
@@ -193,6 +213,25 @@ public class PollenFollower extends LinearOpMode {
         }
         drive(0, 0, 0);
         intake(false);
+    }
+
+    /** SWEEP: intake on, roll a few inches forward past the ball, let it settle, then go find the next one. */
+    private void sweepThrough() {
+        lockedBall = null;                      // next loop searches / locks onto the next ball
+        status = "Intaking - rolling forward a few inches";
+        intake(true);
+        driveDistance(SWEEP_PASS_IN, SWEEP_POWER, PASS_TIMEOUT);
+        waitSeconds(INTAKE_EXTRA_TIME);         // stopped, intake still on so the ball settles in
+        intake(false);
+        collected++;
+        status = "Got it (" + collected + ") - looking for the next ball";
+        sweptOnce = true;
+        sweepTimer.reset();
+    }
+
+    /** True while the intake should stay on between balls in SWEEP mode. */
+    private boolean sweeping() {
+        return COLLECT && SWEEP && sweptOnce && sweepTimer.seconds() < SWEEP_INTAKE_HOLD;
     }
 
     /** Drive past the spot where the ball vanished, then back up and make sure we got it. Retry if not. */
@@ -345,7 +384,7 @@ public class PollenFollower extends LinearOpMode {
 
     private void intake(boolean on) {
         double p = on ? 1 : 0;
-        intakemotor.setPower(p); leftintake.setPower(p); rightintake.setPower(p);
+        intakeParts.setPower(p);
     }
 
     private void show() {

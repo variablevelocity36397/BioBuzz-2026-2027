@@ -94,7 +94,9 @@ public class PollenCollector extends LinearOpMode {
     public static final DcMotorSimple.Direction BL_DIR = DcMotorSimple.Direction.REVERSE;
     public static final DcMotorSimple.Direction FR_DIR = DcMotorSimple.Direction.FORWARD;
     public static final DcMotorSimple.Direction BR_DIR = DcMotorSimple.Direction.FORWARD;
-    public static final DcMotorSimple.Direction INTAKE_MOTOR_DIR = DcMotorSimple.Direction.FORWARD;
+    public static final DcMotorSimple.Direction INTAKE_MOTOR_DIR = DcMotorSimple.Direction.REVERSE;
+    public static final DcMotorSimple.Direction INTAKE2_DIR      = DcMotorSimple.Direction.REVERSE;   // "intake2" (flip if it pushes OUT)
+    public static final DcMotorSimple.Direction TRANSFER_DIR     = DcMotorSimple.Direction.FORWARD;   // "transfer" (flip if it pushes the ball back OUT)
     public static final DcMotorSimple.Direction LEFT_INTAKE_DIR  = DcMotorSimple.Direction.FORWARD;
     public static final DcMotorSimple.Direction RIGHT_INTAKE_DIR = DcMotorSimple.Direction.REVERSE;
 
@@ -180,8 +182,8 @@ public class PollenCollector extends LinearOpMode {
     // ---------- Hardware ----------
     private PinpointLocalizer localizer;
     private HuskyLens huskyLens;
-    private DcMotor flwheel, frwheel, blwheel, brwheel, intakemotor;
-    private CRServo leftintake, rightintake;
+    private DcMotor flwheel, frwheel, blwheel, brwheel;
+    private RobotNames.Intake intakeParts;
 
     private int pollenCollected = 0;
     private String status = "Init";
@@ -189,10 +191,11 @@ public class PollenCollector extends LinearOpMode {
     @Override
     public void runOpMode() {
         // Names match the "Starter Bot" config on the Driver Hub
-        flwheel = hardwareMap.get(DcMotor.class, "fl");
-        frwheel = hardwareMap.get(DcMotor.class, "fr");
-        blwheel = hardwareMap.get(DcMotor.class, "bl");
-        brwheel = hardwareMap.get(DcMotor.class, "br");
+        // Names come from RobotNames.java (works with "BioBuzz Robot" and the old "Starter Bot")
+        flwheel = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.FL, "front left wheel");
+        frwheel = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.FR, "front right wheel");
+        blwheel = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.BL, "back left wheel");
+        brwheel = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.BR, "back right wheel");
         flwheel.setDirection(FL_DIR);
         blwheel.setDirection(BL_DIR);
         frwheel.setDirection(FR_DIR);
@@ -200,20 +203,15 @@ public class PollenCollector extends LinearOpMode {
         for (DcMotor m : new DcMotor[]{flwheel, frwheel, blwheel, brwheel}) {
             m.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         }
-        intakemotor = hardwareMap.get(DcMotor.class, "intakemotor");
-        leftintake  = hardwareMap.get(CRServo.class, "leftintake");
-        rightintake = hardwareMap.get(CRServo.class, "rightintake");
+        intakeParts = new RobotNames.Intake(hardwareMap);   // every intake part in the config
         // The two Gecko wheels face each other, so one spins the opposite way.
         // If a wheel pushes pollen OUT, swap which one is REVERSE.
-        intakemotor.setDirection(INTAKE_MOTOR_DIR);
-        leftintake.setDirection(LEFT_INTAKE_DIR);
-        rightintake.setDirection(RIGHT_INTAKE_DIR);
 
         // Pinpoint, using the PINPOINT settings above
         localizer = new PinpointLocalizer(hardwareMap, PINPOINT);
         localizer.setPose(START);
 
-        huskyLens = hardwareMap.get(HuskyLens.class, "husylens");   // matches the Driver Hub config spelling
+        huskyLens = RobotNames.need(hardwareMap, HuskyLens.class, RobotNames.HUSKY, "HuskyLens");
         boolean cameraFound = huskyLens.knock();
         huskyLens.selectAlgorithm(HuskyLens.Algorithm.COLOR_RECOGNITION);
 
@@ -226,7 +224,7 @@ public class PollenCollector extends LinearOpMode {
                 .label("Use match timer")
                 .prompt(new MessagePrompt(cameraFound
                         ? "HuskyLens ready. Place robot at the START coordinate!"
-                        : "WARNING: HuskyLens NOT FOUND - check I2C wiring, Protocol = I2C, config name 'husylens'"))
+                        : "WARNING: HuskyLens NOT FOUND - check I2C wiring, Protocol = I2C, config name 'husky lens'"))
                 .showSummary()
                 .onComplete(() -> {
                     maxPollen  = prompter.get("max_pollen");
@@ -524,8 +522,8 @@ public class PollenCollector extends LinearOpMode {
 
     private void stopDrive() { setMecanum(0, 0, 0, 1.0); }
 
-    private void intakeOn()  { intakemotor.setPower(1); leftintake.setPower(1); rightintake.setPower(1); }
-    private void intakeOff() { intakemotor.setPower(0); leftintake.setPower(0); rightintake.setPower(0); }
+    private void intakeOn()  { intakeParts.setPower(1); }
+    private void intakeOff() { intakeParts.setPower(0); }
 
     /** Keeps an angle between -180 and +180 degrees (in radians) so the robot turns the short way. */
     private double angleWrap(double radians) {
