@@ -5,14 +5,17 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.pedropathing.math.Pose;
+import com.pedropathing.revhub.localizers.PinpointLocalizer;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
+import org.firstinspires.ftc.teamcode.pedro.Constants;
 import org.firstinspires.ftc.teamcode.subsytems.MecanumDrive;
 import org.firstinspires.ftc.teamcode.subsytems.MotorToggle;
 import org.firstinspires.ftc.teamcode.subsytems.ServoToggle;
 import org.firstinspires.ftc.teamcode.subsytems.Shooter;
-import org.firstinspires.ftc.teamcode.subsytems.TurretPos;
+import org.firstinspires.ftc.teamcode.subsytems.TurretTrack;
 
 @TeleOp(name = "TeleOp", group = "TeleOp")
 public class Teleop extends OpMode {
@@ -20,7 +23,7 @@ public class Teleop extends OpMode {
     private static final double ADJUSTABLE_INTAKE_START = 0.85;
     private static final double ADJUSTABLE_INTAKE_ALT = 0.45;
 
-    private static final double SLOW_SPEED = 0.2;
+    private static final double SLOW_SPEED = 0.5;
     private static final double TURN_SCALE = 0.8;
     private static final double SHOOTER_VELOCITY = 1100;
     private static final double SPIN_UP_TOLERANCE = 12.5;
@@ -33,8 +36,11 @@ public class Teleop extends OpMode {
     private MotorToggle intake2;
     private MotorToggle transfer;
     private ServoToggle adjustableIntake;
-    //private TurretPos turret;
-    private boolean aimOn;
+    private PinpointLocalizer localizer;
+    private TurretTrack turret;
+    private final double[] kdSteps = {0.001, 0.0001};
+    private int kdStepIndex;
+    ElapsedTime transferTimer = new ElapsedTime();
 
     @Override
     public void init() {
@@ -48,12 +54,30 @@ public class Teleop extends OpMode {
         intake2 = new MotorToggle(hardwareMap.get(DcMotor.class, "intake2"));
         DcMotor transferMotor = hardwareMap.get(DcMotor.class, "transfer");
         transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        transfer = new MotorToggle(transferMotor, 0.73);
+        transfer = new MotorToggle(transferMotor, 0.7);
         // Moves to the start position during init
         adjustableIntake = new ServoToggle(hardwareMap.get(Servo.class, "adjustableintake"),
                 ADJUSTABLE_INTAKE_START, ADJUSTABLE_INTAKE_ALT);
         adjustableIntake.update();
-        //turret = new TurretPos(hardwareMap);
+        localizer = new PinpointLocalizer(hardwareMap, Constants.localizerConfig);
+        turret = new TurretTrack(hardwareMap);
+    }
+
+    @Override
+    public void init_loop() {
+        if (gamepad1.xWasPressed()) turret.setAlliance(TurretTrack.Alliance.BLUE);
+        if (gamepad1.bWasPressed()) turret.setAlliance(TurretTrack.Alliance.RED);
+        telemetry.addData("ALLIANCE", turret.getAlliance());
+        telemetry.addLine("X (Square) = BLUE, B (Circle) = RED");
+        telemetry.addLine("Point the turret straight forward by hand before pressing play.");
+        telemetry.addData("Start pose", turret.getAlliance().start);
+        telemetry.update();
+    }
+
+    @Override
+    public void start() {
+        localizer.setPose(turret.getAlliance().start);
+        turret.zero();
     }
 
     @Override
@@ -62,6 +86,9 @@ public class Teleop extends OpMode {
         boolean slowMode = gamepad1.right_trigger > 0.2;
         drive.drive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x * TURN_SCALE,
                 slowMode ? SLOW_SPEED : 1.0);
+
+
+
 
         if (gamepad1.aWasPressed()) {
             shooter.toggle();
@@ -73,13 +100,24 @@ public class Teleop extends OpMode {
             intake1.toggle();
             intake2.set(intake1.isOn());
         }
-        if (gamepad1.xWasPressed()) transfer.toggle();
+        if (gamepad1.xWasPressed()){
+            transferTimer.reset();
+            transfer.set(true);
+        }
+        // Checked every loop so the transfer stops 1 s after the press
+        if (transfer.isOn() && transferTimer.seconds() >= 1) transfer.set(false);
         if (gamepad1.rightBumperWasPressed()) adjustableIntake.toggle();
-        if (gamepad1.dpadLeftWasPressed()) aimOn = !aimOn;
 
-        // Turret only moves while auto aim is toggled on
-        //if (aimOn) turret.aim();
+        // Live KD tuning on gamepad2, resets when the OpMode stops: copy a good value into TurretTrack.KD
+        if (gamepad2.bWasPressed()) kdStepIndex = (kdStepIndex + 1) % kdSteps.length;
+        double kdStep = kdSteps[kdStepIndex];
+        if (gamepad2.dpadUpWasPressed()) turret.setKd(turret.getKd() + kdStep);
+        if (gamepad2.dpadDownWasPressed()) turret.setKd(turret.getKd() - kdStep);
 
+        // Turret always tracks the goal (soft limits applied inside TurretTrack)
+        localizer.update();
+        Pose pose = localizer.state().pose();
+        turret.update(pose, true);
         shooter.update();
         intake1.update();
         intake2.update();
@@ -105,10 +143,11 @@ public class Teleop extends OpMode {
         telemetry.addData("Shooter spin-up time", !shooter.isOn() ? "off"
                 : spinUpTime < 0 ? String.format("spinning up... %.2f s", spinUpTimer.seconds())
                 : String.format("%.2f s", spinUpTime));
-        telemetry.addData("D-pad Left - turret auto aim", aimOn);
-        //telemetry.addData("Turret has target", turret.hasTarget());
-        //telemetry.addData("Turret tx", turret.getTx());
-        // telemetry.addData("Turret angle (deg)", turret.getAngleDeg());
+        if (turret.isAtLimit()) telemetry.addLine("!!! TURRET AT SOFT LIMIT !!!");
+        telemetry.addData("Alliance", turret.getAlliance());
+        telemetry.addData("GP2 Dpad Up/Down - KD", "%.4f", turret.getKd());
+        telemetry.addData("GP2 B (Circle) - KD step", "%.4f", kdStep);
+        telemetry.addData("Turret angle / target (deg)", "%.1f / %.1f", turret.getAngleDeg(), turret.getTarget());
         telemetry.update();
     }
 }
