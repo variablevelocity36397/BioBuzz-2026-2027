@@ -26,7 +26,7 @@ public class BlueTipsideAuto extends OpMode {
     private final Pose gardenPath = poseFactory.of(130, 133.1, 0);
     private final Pose shootPathStart = poseFactory.of(130, 133.1, 0);
     private final Pose shootPath = poseFactory.of(109.777, 12.185, 270);
-    private final Pose shootPathControl1 = poseFactory.of(102.5265, 74.1728, 0);
+    private final Pose shootPathControl1 = poseFactory.of(109.201, 52.0079, 0);
     private final Pose prepForFlower = poseFactory.of(94.4971, 31.22, 270);
     private final Pose flowerPath = poseFactory.of(94.8948, 12.3532, 270);
     private final Pose leaveFlower = poseFactory.of(94.7311, 26.3229, 270);

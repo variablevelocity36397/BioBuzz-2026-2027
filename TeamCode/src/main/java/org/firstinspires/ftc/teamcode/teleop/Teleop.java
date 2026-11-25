@@ -15,16 +15,17 @@ import org.firstinspires.ftc.teamcode.subsytems.MecanumDrive;
 import org.firstinspires.ftc.teamcode.subsytems.MotorToggle;
 import org.firstinspires.ftc.teamcode.subsytems.ServoToggle;
 import org.firstinspires.ftc.teamcode.subsytems.Shooter;
+import org.firstinspires.ftc.teamcode.subsytems.TurretLimelight;
 import org.firstinspires.ftc.teamcode.subsytems.TurretTrack;
 
 @TeleOp(name = "TeleOp", group = "TeleOp")
 public class Teleop extends OpMode {
     // Start position, and the placeholder second position to tune on the robot
-    private static final double ADJUSTABLE_INTAKE_START = 0.85;
-    private static final double ADJUSTABLE_INTAKE_ALT = 0.45;
+    private static final double ADJUSTABLE_INTAKE_START = 0.90;
+    private static final double ADJUSTABLE_INTAKE_ALT = 0.50;
 
-    private static final double SLOW_SPEED = 0.5;
-    private static final double TURN_SCALE = 0.8;
+    private static final double SLOW_SPEED = 0.45;
+    private static final double TURN_SCALE = 0.85;
     private static final double SHOOTER_VELOCITY = 1100;
     private static final double SPIN_UP_TOLERANCE = 12.5;
 
@@ -37,9 +38,8 @@ public class Teleop extends OpMode {
     private MotorToggle transfer;
     private ServoToggle adjustableIntake;
     private PinpointLocalizer localizer;
-    private TurretTrack turret;
-    private final double[] kdSteps = {0.001, 0.0001};
-    private int kdStepIndex;
+    private TurretLimelight turret;
+    private boolean turretTracking = true;
     ElapsedTime transferTimer = new ElapsedTime();
 
     @Override
@@ -60,7 +60,8 @@ public class Teleop extends OpMode {
                 ADJUSTABLE_INTAKE_START, ADJUSTABLE_INTAKE_ALT);
         adjustableIntake.update();
         localizer = new PinpointLocalizer(hardwareMap, Constants.localizerConfig);
-        turret = new TurretTrack(hardwareMap);
+        turret = new TurretLimelight(hardwareMap); // servos unpowered until start()
+        turret.resetEncoder(); // assumes the turret faces forward at init
     }
 
     @Override
@@ -71,6 +72,7 @@ public class Teleop extends OpMode {
         telemetry.addLine("X (Square) = BLUE, B (Circle) = RED");
         telemetry.addLine("Point the turret straight forward by hand before pressing play.");
         telemetry.addData("Start pose", turret.getAlliance().start);
+        telemetry.addData("Turret angle from init (deg)", "%.1f", turret.getAngleDeg());
         telemetry.update();
     }
 
@@ -100,24 +102,21 @@ public class Teleop extends OpMode {
             intake1.toggle();
             intake2.set(intake1.isOn());
         }
-        if (gamepad1.xWasPressed()){
+        // Transfer only runs while the shooter is on
+        if (gamepad1.xWasPressed() && shooter.isOn()) {
             transferTimer.reset();
             transfer.set(true);
         }
-        // Checked every loop so the transfer stops 1 s after the press
-        if (transfer.isOn() && transferTimer.seconds() >= 1) transfer.set(false);
+        // Checked every loop so the transfer stops 1 s after the press, or right away if the shooter turns off
+        if (transfer.isOn() && (transferTimer.seconds() >= 1 || !shooter.isOn())) transfer.set(false);
         if (gamepad1.rightBumperWasPressed()) adjustableIntake.toggle();
 
-        // Live KD tuning on gamepad2, resets when the OpMode stops: copy a good value into TurretTrack.KD
-        if (gamepad2.bWasPressed()) kdStepIndex = (kdStepIndex + 1) % kdSteps.length;
-        double kdStep = kdSteps[kdStepIndex];
-        if (gamepad2.dpadUpWasPressed()) turret.setKd(turret.getKd() + kdStep);
-        if (gamepad2.dpadDownWasPressed()) turret.setKd(turret.getKd() - kdStep);
-
-        // Turret always tracks the goal (soft limits applied inside TurretTrack)
+        // Limelight when tags are seen, odometry otherwise. Driver override: gamepad2 A turns tracking off (turret holds forward).
+        // Soft limits apply in every mode.
+        if (gamepad2.aWasPressed()) turretTracking = !turretTracking;
         localizer.update();
         Pose pose = localizer.state().pose();
-        turret.update(pose, true);
+        turret.update(pose, turretTracking);
         shooter.update();
         intake1.update();
         intake2.update();
@@ -143,10 +142,12 @@ public class Teleop extends OpMode {
         telemetry.addData("Shooter spin-up time", !shooter.isOn() ? "off"
                 : spinUpTime < 0 ? String.format("spinning up... %.2f s", spinUpTimer.seconds())
                 : String.format("%.2f s", spinUpTime));
+        if (turret.isEncoderFault()) telemetry.addLine("!!! TURRET ENCODER FAULT: turret stopped, restart OpMode !!!");
         if (turret.isAtLimit()) telemetry.addLine("!!! TURRET AT SOFT LIMIT !!!");
         telemetry.addData("Alliance", turret.getAlliance());
-        telemetry.addData("GP2 Dpad Up/Down - KD", "%.4f", turret.getKd());
-        telemetry.addData("GP2 B (Circle) - KD step", "%.4f", kdStep);
+        telemetry.addData("GP2 Cross - turret tracking", turretTracking ? "ON" : "OFF (hold forward)");
+        telemetry.addData("Turret mode", turret.getMode());
+        telemetry.addData("Robot pose x / y / heading (deg)", "%.1f / %.1f / %.1f", pose.x(), pose.y(), Math.toDegrees(pose.heading()));
         telemetry.addData("Turret angle / target (deg)", "%.1f / %.1f", turret.getAngleDeg(), turret.getTarget());
         telemetry.update();
     }
