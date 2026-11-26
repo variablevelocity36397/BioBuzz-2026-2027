@@ -4,15 +4,35 @@ import com.qualcomm.hardware.dfrobot.HuskyLens;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.CRServo;
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
 import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.IMU;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.util.Range;
 
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+
 import com.skeletonarmy.marrow.BulkCaching;
+import com.skeletonarmy.marrow.weaver.PathConfig;
+import com.skeletonarmy.marrow.weaver.PathResult;
+import com.skeletonarmy.marrow.weaver.PathRoute;
+import com.skeletonarmy.marrow.weaver.Weaver;
+import com.skeletonarmy.marrow.zones.Point;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /*
   POLLEN FOLLOWER - follow the pollen and INTAKE it
   -------------------------------------------------
+  PATH = true (default, Nov 24): when it sees a ball it works out WHERE the ball is (distance from the box
+  size, angle from the box position), makes a path to that spot (plus PATH_OVERSHOOT_IN past it) and DRIVES
+  that path fast, tracking its own position with the wheel encoders + Control Hub IMU. The camera keeps
+  fixing the path while it can see the ball; when the ball goes under the camera it finishes the path blind
+  with the intake on. Then it searches for the next ball. No limit on balls - runs until STOP.
+  Tune: DIST_K (look at "Ball est" telemetry vs a tape measure), CAMERA_FOV_DEG, PATH_POWER, K_STATIC.
+
+  PATH = false = the older camera-chasing modes below:
     0. SEARCH: no ball in view -> SPIN in place toward the side the ball was last seen, until one shows up.
     1. FOLLOW: LOCK ON to ONE ball (ignores other balls until this one is collected or lost),
                turn to face it (TRACK_MODE) and drive toward it.
@@ -37,18 +57,56 @@ public class PollenFollower extends LinearOpMode {
     // SWEEP = go to the ball, intake it, roll a few inches forward, then look for the next ball
     // (no backing up to check). false = the careful way (pass, back up, check, retry).
     private static final boolean SWEEP = true;
+
+    // ---------- PATH mode: plan a path to the ball and drive it ----------
+    private static final boolean PATH = true;
+    private static final double PATH_POWER       = 0.9;   // forward power on the path (fast)
+    private static final double PICKUP_POWER     = 0.55;  // max forward power once the intake is on (so it doesn't bounce off)
+    private static final double PATH_MIN_POWER   = 0.25;  // power right at the end of the path
+    private static final double PATH_SLOW_PER_IN = 0.04;  // slow down near the end: power limit = MIN + this * inches left
+    private static final double KP_HEADING       = 1.8;   // turn power per RADIAN the path is off to the side
+    private static final double PATH_MAX_TURN    = 0.6;
+    private static final double PATH_OVERSHOOT_IN = 6.0;  // drive the robot's CENTER this far PAST the ball so it's surely in
+    private static final double INTAKE_ON_IN     = 18.0;  // turn the intake on when the ball is this close (robot center)
+    private static final double AFTER_INTAKE_EXTRA_IN = 6.0;  // once the intake turns on, make the path this much LONGER (go a bit further)
+    private static final double TURN_IN_PLACE_DEG = 20.0; // ball more than this far to the side -> stop going forward and spin with ALL 4 wheels
+    private static final double PATH_DONE_IN     = 1.0;   // path finished when this close to the end
+    private static final double PATH_TIMEOUT     = 4.0;   // safety: give up on one path after this many seconds
+    private static final double REPLAN_EVERY     = 0.25;  // seconds between new Weaver paths while balls are in view
+    private static final double LOOKAHEAD_IN     = 8.0;   // aim at the path this far ahead of the robot (bigger = smoother, cuts corners)
+    private static final int    SAMPLES_PER_SEGMENT = 20; // points per Weaver curve
+    // Weaver robot size (inches). WEAVER_INTAKE_WIDTH = HALF the real intake width (Marrow docs say so)
+    private static final double ROBOT_LENGTH_IN = 18.0, ROBOT_WIDTH_IN = 18.0, WEAVER_INTAKE_WIDTH = 4.0;
+    // Where is the ball? distance (in) from camera ~= DIST_K / box width (px). Measure: put a ball 12 in in front
+    // of the camera, read the box width w, set DIST_K = 12 * w.
+    private static final double DIST_K           = 750.0;
+    private static final double CAMERA_FOV_DEG  = 60.0;   // HuskyLens horizontal view angle
+    private static final double CAMERA_FORWARD_IN = 7.0;  // camera is this far in front of the robot's center
+    // Heading: Control Hub IMU ("imu"). If there's no IMU it uses the wheels (needs TRACK_WIDTH_IN).
+    private static final RevHubOrientationOnRobot.LogoFacingDirection HUB_LOGO = RevHubOrientationOnRobot.LogoFacingDirection.UP;
+    private static final RevHubOrientationOnRobot.UsbFacingDirection  HUB_USB  = RevHubOrientationOnRobot.UsbFacingDirection.FORWARD;
+    private static final double TRACK_WIDTH_IN   = 15.0;
+
+    // ---------- Static friction ----------
+    // Small powers don't move the robot at all (static friction). Any wheel that's supposed to move gets at least this.
+    private static final double K_STATIC = 0.1;
     private static final double SWEEP_PASS_IN    = 6.0;   // after a ball vanishes under the camera, keep going this far
     private static final double SWEEP_POWER      = 0.5;   // forward power for that pass
     private static final double SWEEP_INTAKE_HOLD = 0.0;  // 0 = intake OFF while finding the next ball (raise to keep it on longer)
 
     // ---------- Speed ----------
-    private static final double SPEED = 0.7;              // multiplies every drive power (1.0 = full speed)
+    private static final double SPEED = 1.0;              // multiplies every drive power (1.0 = full speed)
+
+    // ---------- Smoothness (less jerky) ----------
+    private static final double ACCEL_RATE = 3.5;         // how fast power can go UP, per second (0 -> 0.9 in ~0.25 s). Lower = smoother
+    private static final double DECEL_RATE = 5.0;         // how fast power can go DOWN, per second
+    private static final double X_SMOOTH   = 0.5;         // 0..1: how much each new camera frame counts for steering. Lower = smoother turning
 
     // ---------- Searching (no ball in view) ----------
-    private static final double SEARCH_TURN  = 0.25;      // spin power while looking for a ball
+    private static final double SEARCH_TURN  = 0.3;       // spin power while looking for a ball
     private static final double SEARCH_SIGN  = 1.0;       // -1.0 if it spins the opposite way you expect
     private static final double LOST_GRACE   = 0.4;       // seconds to wait after losing the ball before spinning
-    private static final double FOUND_STOP   = 0.25;      // seconds to STOP when it first spots a ball (kills the spin)
+    private static final double FOUND_STOP   = 0.0;       // seconds to STOP when it first spots a ball (0 = don't stop, just turn toward it smoothly)
 
     // ---------- Locking onto ONE ball ----------
     private static final int    LOCK_JUMP_PX = 70;        // a box further than this from the locked ball = a DIFFERENT ball
@@ -65,8 +123,8 @@ public class PollenFollower extends LinearOpMode {
     private static final int    CENTER_DEADBAND = 12;     // pixels: this close to center counts as centered
 
     // ---------- Driving toward the ball ----------
-    private static final double APPROACH_POWER = 0.65;    // forward power when the ball is far (was 0.4)
-    private static final double MIN_APPROACH   = 0.35;    // forward power when it's getting close (was 0.25)
+    private static final double APPROACH_POWER = 0.8;     // forward power when the ball is far (was 0.65)
+    private static final double MIN_APPROACH   = 0.45;    // forward power when it is getting close (was 0.35)
     private static final double FORWARD_SIGN   = 1.0;     // -1.0 if it backs away when it should approach
 
     // ---------- Intake (tune with the "Ball box" telemetry) ----------
@@ -114,7 +172,22 @@ public class PollenFollower extends LinearOpMode {
     private final ElapsedTime lostTimer = new ElapsedTime();
     private final ElapsedTime sweepTimer = new ElapsedTime();   // time since the last ball went in (SWEEP)
     private boolean sweptOnce = false;
-    private double lastFwd = 0, lastTurn = 0, lastRight = 0;
+    private double lastFwd = 0, lastTurn = 0, lastRight = 0;     // what we ASKED for
+    private double curFwd = 0, curTurn = 0, curRight = 0;        // what the wheels are actually getting (ramped)
+    private final ElapsedTime rampTimer = new ElapsedTime();
+    private double filtX = SCREEN_W / 2.0;                       // smoothed ball x (steering)
+
+    // PATH mode state. Position is in inches from where the robot started: x = forward, y = left, h = heading (radians, + = left)
+    private IMU imu;
+    private double poseX = 0, poseY = 0, poseH = 0, lastFTicks = 0, lastSTicks = 0;
+    private boolean hasPath = false, intakeLatched = false;
+    private double ballEstIn = 0;
+    private List<Point> pathPts = new ArrayList<>();   // the Weaver path, as points
+    private List<Point> targets = new ArrayList<>();   // balls this path visits
+    private int progress = 0;                          // index of the path point we are at
+    private String weaverStatus = "no path yet";
+    private final ElapsedTime replanTimer = new ElapsedTime();
+    private final ElapsedTime pathTimer = new ElapsedTime();
 
     @Override
     public void runOpMode() {
@@ -139,13 +212,30 @@ public class PollenFollower extends LinearOpMode {
         boolean found = huskyLens.knock();
         huskyLens.selectAlgorithm(HuskyLens.Algorithm.COLOR_RECOGNITION);
 
+        imu = hardwareMap.tryGet(IMU.class, "imu");
+        if (imu != null) {
+            imu.initialize(new IMU.Parameters(new RevHubOrientationOnRobot(HUB_LOGO, HUB_USB)));
+        }
+        {
+            // Marrow Weaver: robot size + intake. robotWidth = along the forward axis, robotHeight = across (Marrow names)
+            Weaver.setConfig(new PathConfig()
+                    .intakeWidth(WEAVER_INTAKE_WIDTH)
+                    .robotWidth(ROBOT_LENGTH_IN)
+                    .robotHeight(ROBOT_WIDTH_IN));
+        }
+
         telemetry.addData("HuskyLens", found ? "ready" : "NOT FOUND - check wiring / config name 'husky lens'");
         telemetry.addData("Intake parts", intakeParts.describe());
-        telemetry.addData("Mode", COLLECT ? "follow + INTAKE" : "follow only");
+        telemetry.addData("Heading from", imu != null ? "IMU" : "wheels (no 'imu' in config)");
+        telemetry.addData("Mode", !COLLECT ? "follow only" : PATH ? "Marrow WEAVER path through the balls + INTAKE" : "follow + INTAKE");
         telemetry.update();
         waitForStart();
+        if (imu != null) imu.resetYaw();
+        lastFTicks = avgForwardTicks();
+        lastSTicks = avgStrafeTicks();
 
         while (opModeIsActive()) {
+            if (COLLECT && PATH) { pathStep(); continue; }
             HuskyLens.Block ball = findPollen();
 
             if (ball == null) {
@@ -158,9 +248,10 @@ public class PollenFollower extends LinearOpMode {
                     wasClose = false;
                     pickUpAndCheck();
                 } else if (lockedBall != null && lostTimer.seconds() < LOST_GRACE) {
-                    status = "Lost the ball - waiting a moment";
+                    // Camera blinked - keep doing what we were doing instead of slamming to a stop
+                    status = "Lost the ball for a moment - keep going";
                     intake(sweeping());
-                    drive(0, 0, 0);
+                    drive(lastFwd, lastTurn, lastRight);
                 } else {
                     // Nothing in view -> spin toward where we last saw a ball
                     lockedBall = null;
@@ -172,19 +263,19 @@ public class PollenFollower extends LinearOpMode {
                 continue;
             }
 
-            if (lockedBall == null && !sweeping()) {
+            if (lockedBall == null) filtX = ball.x;   // new ball -> start steering from where it really is
+            if (lockedBall == null && !sweeping() && FOUND_STOP > 0) {
                 // Just spotted a ball after searching -> STOP first so the spin doesn't carry it past
                 lockedBall = ball;
                 status = "Found a ball - stopping";
-                drive(0, 0, 0);
-                show();
-                sleep((long) (FOUND_STOP * 1000));
+                waitSeconds(FOUND_STOP);
                 lostTimer.reset();
                 continue;
             }
             lockedBall = ball;                    // stay on THIS ball
             lostTimer.reset();
-            int xErr = ball.x - SCREEN_W / 2;
+            filtX += X_SMOOTH * (ball.x - filtX); // smooth out camera wobble
+            int xErr = (int) Math.round(filtX - SCREEN_W / 2.0);
             lastSide = xErr <= 0 ? 1 : -1;        // remember its side, so a search spins that way
             double[] side = sideways(xErr);       // {turn, right}
             boolean close = ball.width >= INTAKE_ZONE_WIDTH || ball.y >= INTAKE_ZONE_Y;
@@ -211,8 +302,212 @@ public class PollenFollower extends LinearOpMode {
             }
             show();
         }
-        drive(0, 0, 0);
+        stopNow();
         intake(false);
+    }
+
+    // ======================= PATH mode (Marrow WEAVER) =======================
+    // Every pollen ball the camera sees becomes a Weaver TARGET. Weaver picks the best order and makes ONE smooth
+    // path through all of them (robot center over each ball, facing along the path so the intake sweeps it up).
+    // We drive that path ourselves (pure pursuit: aim at a point LOOKAHEAD_IN ahead on the path), using our
+    // encoder + IMU position. Pedro's follower isn't used because Pedro isn't tuned on this robot yet.
+
+    /** One loop of PATH mode: track position, plan/fix the path from the camera, drive it, pick up. */
+    private void pathStep() {
+        updatePose();
+        List<Point> balls = seeBalls();
+        boolean closeOnCamera = false;
+        if (!intakeLatched && !balls.isEmpty() && (!hasPath || replanTimer.seconds() > REPLAN_EVERY)) {
+            planWithWeaver(balls);   // once the intake is on, finish the path blind (camera can't see under the robot)
+        }
+        if (lastBall != null && seenFrames > 0)
+            closeOnCamera = lastBall.width >= INTAKE_ZONE_WIDTH || lastBall.y >= INTAKE_ZONE_Y;
+
+        if (!hasPath) {
+            intake(false);
+            status = "Searching - spinning " + (lastSide > 0 ? "left" : "right");
+            drive(0, SEARCH_TURN * lastSide * SEARCH_SIGN, 0);
+            show();
+            return;
+        }
+
+        // Where are we on the path? (closest point, only searching forward so we never go backwards)
+        int last = pathPts.size() - 1;
+        double best = Double.MAX_VALUE;
+        for (int i = progress; i <= Math.min(last, progress + 30); i++) {
+            double d = dist(pathPts.get(i));
+            if (d < best) { best = d; progress = i; }
+        }
+        Point end = pathPts.get(last);
+        double ex = end.getX() - poseX, ey = end.getY() - poseY;
+        boolean passed = ex * Math.cos(poseH) + ey * Math.sin(poseH) < 0 && progress >= last - 1;
+        double remaining = remainingLength();
+        if ((progress >= last && dist(end) < PATH_DONE_IN) || passed || pathTimer.seconds() > PATH_TIMEOUT) {
+            finishPickup();
+            return;
+        }
+
+        // Intake on when we get near a ball, then keep it on for the rest of the path
+        if (!intakeLatched && (closeOnCamera || nearestTargetDist() < INTAKE_ON_IN)) {
+            intakeLatched = true;
+            extendEnd(AFTER_INTAKE_EXTRA_IN);   // go a bit further once the intake starts
+            last = pathPts.size() - 1;
+            remaining = remainingLength();
+        }
+        intake(intakeLatched);
+
+        // Aim at a point a little way ahead on the path
+        Point aim = pathPts.get(last);
+        for (int i = progress; i <= last; i++) {
+            if (dist(pathPts.get(i)) >= LOOKAHEAD_IN) { aim = pathPts.get(i); break; }
+        }
+        double err = wrap(Math.atan2(aim.getY() - poseY, aim.getX() - poseX) - poseH);   // + = aim point is to the left
+
+        double turn = Range.clip(KP_HEADING * err, -PATH_MAX_TURN, PATH_MAX_TURN) * TURN_SIGN;
+        // Far off to the side -> turn IN PLACE (all 4 wheels: left side back, right side forward) before driving
+        // (not in the last 8 in - there it just keeps rolling so it doesn't spin around next to the ball)
+        double fwd = Math.abs(err) > Math.toRadians(TURN_IN_PLACE_DEG) && remaining > 8.0 ? 0
+                   : PATH_POWER * Math.cos(err);
+        fwd = Math.min(fwd, PATH_MIN_POWER + PATH_SLOW_PER_IN * remaining);  // slow down near the end
+        if (intakeLatched) fwd = Math.min(fwd, PICKUP_POWER);
+        status = (intakeLatched ? "Weaver path - intake ON" : "Weaver path to " + targets.size() + " ball(s)");
+        drive(fwd * FORWARD_SIGN, turn, 0);
+        show();
+    }
+
+    /** All pollen balls in view right now, as field points (inches, same frame as poseX/poseY). */
+    private List<Point> seeBalls() {
+        List<Point> out = new ArrayList<>();
+        HuskyLens.Block[] blocks = huskyLens.blocks();
+        HuskyLens.Block biggest = null;
+        if (blocks != null) {
+            for (HuskyLens.Block b : blocks) {
+                if (b.id != POLLEN_ID) continue;
+                if (b.width < MIN_BOX_PX || b.height < MIN_BOX_PX) continue;
+                double aspect = (double) b.width / b.height;
+                if (aspect < MIN_ASPECT || aspect > MAX_ASPECT) continue;
+                if (b.y < MIN_Y) continue;
+                out.add(ballToField(b));
+                if (biggest == null || b.width > biggest.width) biggest = b;
+            }
+        }
+        if (biggest == null) { seenFrames = 0; return out; }
+        lastBall = biggest;
+        lastSide = biggest.x <= SCREEN_W / 2 ? 1 : -1;
+        seenFrames++;
+        if (seenFrames < CONFIRM_FRAMES && !hasPath) out.clear();   // must see balls a couple of frames before trusting them
+        return out;
+    }
+
+    /** Camera box -> where that ball is on the field. */
+    private Point ballToField(HuskyLens.Block b) {
+        double ang = -(b.x - SCREEN_W / 2.0) / (SCREEN_W / 2.0) * Math.toRadians(CAMERA_FOV_DEG / 2.0);
+        double d = DIST_K / Math.max(b.width, 1);
+        if (b == lastBall || lastBall == null || b.width >= lastBall.width) ballEstIn = d;
+        double camX = poseX + CAMERA_FORWARD_IN * Math.cos(poseH), camY = poseY + CAMERA_FORWARD_IN * Math.sin(poseH);
+        return new Point(camX + d * Math.cos(poseH + ang), camY + d * Math.sin(poseH + ang));
+    }
+
+    /** Ask Weaver for a path from where we are through the balls, then add the overshoot at the end. */
+    private void planWithWeaver(List<Point> balls) {
+        Point start = new Point(poseX, poseY, poseH);
+        List<Point> newPts = new ArrayList<>();
+        int visited;
+        try {
+            PathResult result = Weaver.builder()
+                    .start(start)
+                    .targets(balls)
+                    .build();
+            PathRoute route = result.getPath();
+            newPts.addAll(route.sample(SAMPLES_PER_SEGMENT));
+            visited = result.getVisitedTargets().size();
+            targets = new ArrayList<>(result.getVisitedTargets());
+            double endHeading = route.getHeading(route.getSegmentCount());
+            Point last = newPts.get(newPts.size() - 1);
+            newPts.add(new Point(last.getX() + PATH_OVERSHOOT_IN * Math.cos(endHeading),
+                                 last.getY() + PATH_OVERSHOOT_IN * Math.sin(endHeading)));
+            weaverStatus = "ok - " + route.getSegmentCount() + " curves, " + visited + " ball(s)";
+        } catch (RuntimeException e) {
+            // Weaver couldn't make a path -> straight line to the closest ball
+            Point closest = balls.get(0);
+            for (Point p : balls) if (dist(p) < dist(closest)) closest = p;
+            double h = Math.atan2(closest.getY() - poseY, closest.getX() - poseX);
+            newPts.add(start);
+            newPts.add(closest);
+            newPts.add(new Point(closest.getX() + PATH_OVERSHOOT_IN * Math.cos(h), closest.getY() + PATH_OVERSHOOT_IN * Math.sin(h)));
+            targets = new ArrayList<>();
+            targets.add(closest);
+            weaverStatus = "failed (" + e.getMessage() + ") - straight line";
+        }
+        if (newPts.size() < 2) return;
+        pathPts = newPts;
+        progress = 0;
+        if (!hasPath) {
+            hasPath = true;
+            intakeLatched = false;
+            pathTimer.reset();
+        }
+        replanTimer.reset();
+    }
+
+    /** Make the path longer in the direction it's heading at the end. */
+    private void extendEnd(double inches) {
+        int n = pathPts.size();
+        Point a = pathPts.get(n - 2), b = pathPts.get(n - 1);
+        double h = Math.atan2(b.getY() - a.getY(), b.getX() - a.getX());
+        pathPts.add(new Point(b.getX() + inches * Math.cos(h), b.getY() + inches * Math.sin(h)));
+    }
+
+    private double remainingLength() {
+        double len = dist(pathPts.get(progress));
+        for (int i = progress; i < pathPts.size() - 1; i++) len += pathPts.get(i).distanceTo(pathPts.get(i + 1));
+        return len;
+    }
+
+    private double nearestTargetDist() {
+        double best = Double.MAX_VALUE;
+        for (Point t : targets) best = Math.min(best, dist(t));
+        return best;
+    }
+
+    private double dist(Point p) {
+        return Math.hypot(p.getX() - poseX, p.getY() - poseY);
+    }
+
+    /** End of the path: stop with the intake still on so the balls settle, then go look for more. */
+    private void finishPickup() {
+        status = "End of path - finishing the pickup";
+        intake(true);
+        waitSeconds(INTAKE_EXTRA_TIME);
+        intake(false);
+        collected += Math.max(1, targets.size());
+        hasPath = false;
+        intakeLatched = false;
+        targets = new ArrayList<>();
+        seenFrames = 0;
+        status = "Got them (" + collected + ") - looking for more";
+    }
+
+    /** Track where the robot is: wheel encoders for distance, IMU (or wheels) for heading. */
+    private void updatePose() {
+        double f = avgForwardTicks(), s = avgStrafeTicks();
+        double dF = (f - lastFTicks) * INCHES_PER_TICK, dR = (s - lastSTicks) * INCHES_PER_TICK;
+        lastFTicks = f; lastSTicks = s;
+        if (imu != null) {
+            poseH = imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.RADIANS);
+        } else {
+            double right = (fr.getCurrentPosition() + br.getCurrentPosition()) / 2.0;
+            double left = (fl.getCurrentPosition() + bl.getCurrentPosition()) / 2.0;
+            poseH = (right - left) * INCHES_PER_TICK / TRACK_WIDTH_IN;
+        }
+        poseX += dF * Math.cos(poseH) + dR * Math.sin(poseH);
+        poseY += dF * Math.sin(poseH) - dR * Math.cos(poseH);
+    }
+
+    private static double wrap(double a) {
+        while (a > Math.PI) a -= 2 * Math.PI;
+        while (a < -Math.PI) a += 2 * Math.PI;
+        return a;
     }
 
     /** SWEEP: intake on, roll a few inches forward past the ball, let it settle, then go find the next one. */
@@ -298,7 +593,7 @@ public class PollenFollower extends LinearOpMode {
             drive(dir * power * FORWARD_SIGN, 0, 0);
             show();
         }
-        drive(0, 0, 0);
+        stopNow();
     }
 
     /** Slide right (+) or left (-) a distance in inches (mecanum; roughly, from the encoders). */
@@ -311,7 +606,7 @@ public class PollenFollower extends LinearOpMode {
             drive(0, 0, dir * 0.5);
             show();
         }
-        drive(0, 0, 0);
+        stopNow();
     }
 
     private double avgForwardTicks() {
@@ -324,7 +619,7 @@ public class PollenFollower extends LinearOpMode {
 
     /** Look for a ball for a moment without moving. Returns the biggest one seen, or null. */
     private HuskyLens.Block lookFor(double seconds) {
-        drive(0, 0, 0);
+        stopNow();
         seenFrames = 0;
         HuskyLens.Block best = null;
         ElapsedTime t = new ElapsedTime();
@@ -337,7 +632,7 @@ public class PollenFollower extends LinearOpMode {
     }
 
     private void waitSeconds(double s) {
-        drive(0, 0, 0);
+        stopNow();
         ElapsedTime t = new ElapsedTime();
         while (opModeIsActive() && t.seconds() < s) show();
     }
@@ -369,17 +664,50 @@ public class PollenFollower extends LinearOpMode {
         if (best == null) { seenFrames = 0; return null; }
         lastBall = best;
         seenFrames++;
-        return seenFrames >= CONFIRM_FRAMES ? best : null;
+        // Need CONFIRM_FRAMES in a row to START chasing a ball, but once locked, one frame is enough
+        // (so a single blink doesn't make it stop and start again)
+        return (seenFrames >= CONFIRM_FRAMES || lockedBall != null) ? best : null;
     }
 
     /** forward (+ = ahead), turn (+ = left), right (+ = slide right). Same mecanum math as the collector, times SPEED. */
     private void drive(double forward, double turn, double right) {
         lastFwd = forward; lastTurn = turn; lastRight = right;
+        // RAMP: don't jump straight to the new power, move toward it a little each loop (smooth, not jerky)
+        double dt = Math.min(rampTimer.seconds(), 0.1);
+        rampTimer.reset();
+        curFwd = ramp(curFwd, forward, dt);
+        curTurn = ramp(curTurn, turn, dt);
+        curRight = ramp(curRight, right, dt);
+        setWheels(curFwd, curTurn, curRight);
+    }
+
+    private static double ramp(double cur, double target, double dt) {
+        boolean slowingDown = Math.abs(target) < Math.abs(cur) || cur * target < 0;
+        double step = (slowingDown ? DECEL_RATE : ACCEL_RATE) * dt;
+        return cur + Range.clip(target - cur, -step, step);
+    }
+
+    /** Stop right now (no ramp) - used for planned stops like after a pickup. */
+    private void stopNow() {
+        lastFwd = lastTurn = lastRight = 0;
+        curFwd = curTurn = curRight = 0;
+        setWheels(0, 0, 0);
+        rampTimer.reset();
+    }
+
+    private void setWheels(double forward, double turn, double right) {
         double r = -turn;
         double lf = forward + right + r, lb = forward - right + r, rf = forward - right - r, rb = forward + right - r;
         double biggest = Math.max(1.0, Math.max(Math.max(Math.abs(lf), Math.abs(lb)), Math.max(Math.abs(rf), Math.abs(rb))));
         double k = SPEED / biggest;
-        fl.setPower(lf * k); bl.setPower(lb * k); fr.setPower(rf * k); br.setPower(rb * k);
+        fl.setPower(beatFriction(lf * k)); bl.setPower(beatFriction(lb * k));
+        fr.setPower(beatFriction(rf * k)); br.setPower(beatFriction(rb * k));
+    }
+
+    /** Static friction: a wheel that should move gets at least K_STATIC power, so small powers still move it. */
+    private static double beatFriction(double p) {
+        if (Math.abs(p) < 0.02) return 0;
+        return Math.signum(p) * (K_STATIC + (1 - K_STATIC) * Math.abs(p));
     }
 
     private void intake(boolean on) {
@@ -397,6 +725,13 @@ public class PollenFollower extends LinearOpMode {
         }
         telemetry.addData("Drive", "forward %.2f  turn left %.2f  slide right %.2f", lastFwd, lastTurn, lastRight);
         telemetry.addData("Wheels moved", "%.1f in", avgForwardTicks() * INCHES_PER_TICK);
+        if (PATH) {
+            telemetry.addData("Robot at", "x %.1f  y %.1f in   heading %.0f deg", poseX, poseY, Math.toDegrees(poseH));
+            telemetry.addData("Ball est", "%.1f in from camera (DIST_K / box width)", ballEstIn);
+            telemetry.addData("Weaver", weaverStatus);
+            if (hasPath && !pathPts.isEmpty()) telemetry.addData("Path", "point %d of %d   (%.1f in to go)",
+                    progress, pathPts.size() - 1, remainingLength());
+        }
         telemetry.update();
     }
 }

@@ -11,7 +11,7 @@ Android Studio project; team code lives in `TeamCode/`. Build/deploy with ▶ Ru
   once overwritten by pasted robot code and broke the build; it was restored from git.
 - Team code goes in `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`.
 - Don't paste old copies of files over these — older copies were written for a different project
-  (`pedropathingquickstart`) and import `org.firstinspires.ftc.teamcode.pedro.Constants`, which doesn't exist here.
+  (`pedropathingquickstart`) and import `org.firstinspires.ftc.teamcode.pedro.Constants` - NOTE (Nov 24): teammates merged a TUNED `pedro/Constants.java` into master (Pinpoint offsets, Foresight, drivetrain flwheel/frwheel/blwheel/brwheel with BL = FORWARD, unlike PollenCollector.BL_DIR = REVERSE). Teammates' package `autos` (lowercase) shares the `Autos` folder on macOS (case-insensitive). Teleop intake dirs: intake1 REVERSE, intake2 FORWARD, transfer REVERSE (power 0.7).
 - Explain things simply; the user is a student.
 
 ## Driver Hub config — NEW: "BioBuzz Robot" (Nov 11 2026)
@@ -31,7 +31,7 @@ Old "Starter Bot" names (`fl fr bl br intakemotor leftintake rightintake husylen
 Motor/intake directions are shared constants in `Autos/PollenCollector.java` (`FL_DIR`, `LEFT_INTAKE_DIR`, ...).
 
 ## OpModes
-- **`Autos/PollenFollower.java` — "Pollen Follower"** (Nov 11: `COLLECT = true` - chase + intake) **`SWEEP = true`** (Nov 11): user wants: drive to ball (intake off), when close intake ON, roll 6 in forward, stop 0.5 s with intake on, intake off, then search for the next ball. No back-up/check. `SWEEP = false` = old pass/back-up/check/retry. Also: SPEED 0.7, SEARCH_TURN 0.25, MAX_TURN 0.45, KP_TURN 0.005, APPROACH_POWER 0.65, 0.25 s stop when a ball is first spotted (skipped while sweeping). Intake dirs: INTAKE_MOTOR_DIR and INTAKE2_DIR both REVERSE (user said it was out-taking). (the one the user is testing now).
+- **`Autos/PollenFollower.java` — "Pollen Follower"** (Nov 11: `COLLECT = true` - chase + intake) **`SWEEP = true`** (Nov 11): user wants: drive to ball (intake off), when close intake ON, roll 6 in forward, stop 0.5 s with intake on, intake off, then search for the next ball. No back-up/check. `SWEEP = false` = old pass/back-up/check/retry. Also: SPEED 0.9, SEARCH_TURN 0.25, MAX_TURN 0.45, KP_TURN 0.005, APPROACH_POWER 0.8, MIN_APPROACH 0.45 (Nov 24: user asked faster). Nov 24 "less jerky": power ramps (ACCEL_RATE/DECEL_RATE), steering smoothed (X_SMOOTH), keeps going through 1-frame camera blinks, FOUND_STOP = 0 (no stop on spotting). No ball limit - runs until STOP. Nov 24 (2): `PATH = true` - estimates ball spot (DIST_K / box width, CAMERA_FOV_DEG), drives a path there + PATH_OVERSHOOT_IN using encoders + Control Hub IMU ("imu", HUB_LOGO/HUB_USB orientation unverified), intake on within INTAKE_ON_IN, finishes blind. AFTER_INTAKE_EXTRA_IN 6 (path gets 6 in longer when intake starts), TURN_IN_PLACE_DEG 20 (spins in place on all 4 wheels if ball is >20 deg off, except last 8 in). Nov 24 (3): PATH mode now uses Marrow WEAVER - all visible balls -> Weaver targets -> one smooth path; followed by our own pure pursuit (LOOKAHEAD_IN 8) on encoder+IMU pose (Pedro follower not tuned). Replans every 0.25 s until intake starts, then finishes blind. Falls back to a straight line if Weaver throws. Compiled OK with javac vs SDK 11.2.1 + Marrow 1.2.5 (gradle blocked in sandbox). K_STATIC 0.1 static-friction boost on every wheel. SPEED 1.0, PATH_POWER 0.9. DIST_K 750 is a GUESS - measure. Intake dirs: INTAKE_MOTOR_DIR and INTAKE2_DIR both REVERSE (user said it was out-taking). (the one the user is testing now).
   Follows AND intakes (`COLLECT = true`): turns to face the pollen (`TRACK_MODE = TURN`), intake on when close,
   drives `PASS_DISTANCE_IN` (12 in, wheel encoders) past where the ball vanished, backs up to check, retries if missed.
   `COLLECT = false` = follow only (holds `FOLLOW_WIDTH` distance, no intake). See docs/INTAKE_NOTES.md.
@@ -41,12 +41,13 @@ Motor/intake directions are shared constants in `Autos/PollenCollector.java` (`F
   `START`, `SEARCH_SPOTS`, `SCORE` are **placeholders**. Pinpoint pod offsets are 0 until the Pinpoint tuner is run.
   Uses Marrow Prompter (INIT settings), TimerEx (match clock), Zones (ignore balls estimated off-field),
   `@BulkCaching`. Camera mount constants (`CAMERA_HEIGHT_IN` etc.) need measuring.
+- **`Autos/Pollenintaker.java` — "Pollen Intaker (Weaver + Pedro)"** (Nov 24): Pedro drives via `pedro.Constants.create(hardwareMap)` (team-tuned Pinpoint + Mecanum + Foresight). No pollen -> follower.manual turn in place. Pollen -> field spots (camera height/tilt from PollenCollector) -> Weaver -> straight legs: follower.hold(new heading) to turn in place, then line(...).tangent(). SMOOTH_CURVE=true follows PedroPathingConverter.toPath(result). Spins > MAX_LOOK_SPIN_DEG 540 -> drives (Weaver .end(spot), around OBSTACLES) to next SEARCH_SPOTS (placeholders). OBSTACLES = Zone list (placeholder HIVE CircleZone(72,72,12)) used by every Weaver path; balls inside ignored. MAX_TRIES 2 per ball spot (SAME_BALL_IN 8) then ignore + move. SAFETY (Nov 25): gapAt() = inches from robot edge (ROBOT_HALF_IN 9) to nearest wall/OBSTACLE; < SLOW_GAP_IN 12 -> sets Constants.foresightConfig.maxVelocityConstraint = SLOW_SPEED_IN_PER_S 15 (Pedro reads it live; units assumed in/s, unverified on robot); < STOP_GAP_IN 3 while driving toward it -> hold (stop), backAway() turns away + drives BACK_AWAY_IN 8. maxVelocityConstraint is a SHARED static -> reset to Infinity in a finally block. Intake on within INTAKE_ON_IN, OVERSHOOT_IN 12. START 72,9,90 (placeholder).
 - **`TestComponents/StarterBotDirectionTest.java`**: X/Y/A/B spin fl/fr/bl/br, D-pad drives/turns,
   bumpers/triggers run intake parts. Use it to find wrong wheel names/directions.
 
 ## Libraries
-- Marrow `com.skeletonarmyftc.marrow:core:1.2.2` (in `TeamCode/build.gradle`). Used: `prompts.*`, `TimerEx`,
-  `zones.Point/PolygonZone/Zone`, `BulkCaching` (annotation element is `mode`, default AUTO — use bare `@BulkCaching`).
+- Marrow `com.skeletonarmyftc.marrow:core:1.2.5` (in `TeamCode/build.gradle`). Used: `prompts.*`, `TimerEx`,
+  `zones.Point/PolygonZone/Zone`, `BulkCaching`, `weaver.Weaver` (1.2.5+, path planner: Weaver.builder().start(Point(x,y,h)).targets(list).build() -> PathResult.getPath().sample(n); docs https://marrow.skeletonarmyftc.com/automations/weaver) (annotation element is `mode`, default AUTO — use bare `@BulkCaching`).
 - Pedro Pathing revhub 3.0.0 (`PinpointLocalizer`, `PinpointConfig`, `Pose`, `PoseFactory`).
 
 ## Known issues / history

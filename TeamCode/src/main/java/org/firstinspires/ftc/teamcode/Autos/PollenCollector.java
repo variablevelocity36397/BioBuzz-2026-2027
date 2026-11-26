@@ -118,15 +118,15 @@ public class PollenCollector extends LinearOpMode {
     // ---------- HuskyLens ----------
     private static final int    POLLEN_ID       = 1;     // ID the HuskyLens learned for pollen
     private static final int    SCREEN_W        = 320;   // HuskyLens image size
-    private static final int    SCREEN_H        = 240;
-    private static final double HFOV_DEG        = 60.0;  // HuskyLens field of view (approx.)
-    private static final double VFOV_DEG        = 45.0;
+    public static final int    SCREEN_H        = 240;
+    public static final double HFOV_DEG        = 60.0;  // HuskyLens field of view (approx.)
+    public static final double VFOV_DEG        = 45.0;
 
     // Where the HuskyLens is on the robot (MEASURE THESE - used to estimate where the ball is on the field)
-    private static final double CAMERA_HEIGHT_IN       = 8.0;  // lens height above the floor
-    private static final double CAMERA_PITCH_DOWN_DEG  = 25.0; // how far the camera is tilted DOWN
-    private static final double CAMERA_FORWARD_IN      = 7.0;  // lens distance in front of the robot's center
-    private static final double BALL_RADIUS_IN         = 1.5;  // pollen is ~3 in across
+    public static final double CAMERA_HEIGHT_IN       = 8.0;  // lens height above the floor
+    public static final double CAMERA_PITCH_DOWN_DEG  = 25.0; // how far the camera is tilted DOWN
+    public static final double CAMERA_FORWARD_IN      = 7.0;  // lens distance in front of the robot's center
+    public static final double BALL_RADIUS_IN         = 1.5;  // pollen is ~3 in across
 
     // ---------- P gain for steering onto pollen with the camera ----------
     private static final double KP_VISION_TURN  = 0.004; // turn power per PIXEL the ball is off-center
@@ -173,7 +173,9 @@ public class PollenCollector extends LinearOpMode {
     private static final double RETURN_TIME  = 5.0;  // head to SCORE when this many seconds are left
 
     // ---------- Marrow ----------
-    private final Prompter prompter = new Prompter(this);
+    // Made in runOpMode(), NOT here: gamepad1/gamepad2 are still null when this object is created
+    // (that caused "NullPointerException ... Gamepad.a on a null object reference")
+    private Prompter prompter;
     private final TimerEx matchTimer = new TimerEx(AUTO_LENGTH);
     private int     maxPollen  = 4;
     private double  startDelay = 0.0;
@@ -190,6 +192,7 @@ public class PollenCollector extends LinearOpMode {
 
     @Override
     public void runOpMode() {
+        prompter = new Prompter(this);   // gamepads exist now
         // Names match the "Starter Bot" config on the Driver Hub
         // Names come from RobotNames.java (works with "BioBuzz Robot" and the old "Starter Bot")
         flwheel = RobotNames.need(hardwareMap, DcMotor.class, RobotNames.FL, "front left wheel");
