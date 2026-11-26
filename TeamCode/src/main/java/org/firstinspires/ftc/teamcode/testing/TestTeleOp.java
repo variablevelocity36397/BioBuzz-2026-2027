@@ -11,7 +11,6 @@ import org.firstinspires.ftc.teamcode.subsytems.MecanumDrive;
 import org.firstinspires.ftc.teamcode.subsytems.MotorToggle;
 import org.firstinspires.ftc.teamcode.subsytems.ServoToggle;
 import org.firstinspires.ftc.teamcode.subsytems.Shooter;
-import org.firstinspires.ftc.teamcode.subsytems.TurretPos;
 
 @TeleOp(name = "Test TeleOp", group = "Test")
 public class TestTeleOp extends OpMode {
@@ -30,7 +29,6 @@ public class TestTeleOp extends OpMode {
     private MotorToggle intake2;
     private MotorToggle transfer;
     private ServoToggle adjustableIntake;
-    //private TurretPos turret;
     private boolean aimOn;
 
     @Override
@@ -47,7 +45,6 @@ public class TestTeleOp extends OpMode {
         transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
         transfer = new MotorToggle(transferMotor, 0.75);
         adjustableIntake = new ServoToggle(hardwareMap.get(Servo.class, "adjustableintake"), ADJUSTABLE_INTAKE_OFF, ADJUSTABLE_INTAKE_ON);
-        //turret = new TurretPos(hardwareMap);
     }
 
     @Override

@@ -10,13 +10,16 @@ import org.firstinspires.ftc.teamcode.vision.HiveTagCamera;
  * All motion goes through TurretTrack.aimAt, so its PD, soft limits and encoder-fault stop stay in charge.
  */
 public class TurretLimelight {
-    public enum Mode { OFF, CAMERA, GRACE, ODOMETRY }
+    public enum Mode { OFF, MANUAL, CAMERA, GRACE, ODOMETRY }
 
     // Set on robot 2026-11-22: +1 turns the turret toward the tags on this camera mount
     public static final double AIM_SIGN = 1;
-    public static final double DEADBAND_DEG = 3; // starting value, tune in Test Turret Limelight (odometry keeps TurretTrack's 1)
+    public static final double DEADBAND_DEG = 1.5; // set 2026-11-25 (was 3), tune in Test Turret Limelight (odometry keeps TurretTrack's 1)
     public static final double MAX_FRAME_AGE_MS = 100; // older pictures are ignored. Tune: ~2x the normal latency
-    public static final double GRACE_MS = 150; // keep the camera target this long after the tags are lost, then odometry
+    // Each new frame moves the camera target this fraction of the way (1 = no smoothing). Stops the jump when a tag
+    // enters or leaves view and the tag average shifts. Lower = smoother but slower to follow. Tune on robot.
+    public static final double SMOOTHING = 0.25;
+    public static final double GRACE_MS = 100; // keep the camera target this long after the tags are lost, then odometry
     // Camera sits this far right of the shooter (parallel). Shooter must point atan(offset / distance) right of where
     // the camera centers the tags; distance comes from odometry. Min distance stops the offset blowing up up close.
     public static final double CAMERA_RIGHT_OF_SHOOTER_IN = 2;
@@ -80,9 +83,15 @@ public class TurretLimelight {
         if (newFrame && seeing) {
             // Use where the turret and robot were when the picture was taken, so turning since then isn't counted twice
             int i = lookup(now - (long) (camera.getLatencyMs() * 1e6));
-            // Turn until the shooter sees the tags at the aim table's tx for this spot
+            // Turn until the shooter points at the tag average (aim table on hold, not used for aiming)
             offsetDeg = shooterOffsetDeg(turret.goalDistance(robot));
-            base = histAngle[i] + (AIM_SIGN * camera.getTx() - offsetDeg) - turret.aimTable(robot)[1];
+            double raw = histAngle[i] + (AIM_SIGN * camera.getTx() - offsetDeg) + turret.aimCorrection(robot);
+            if (lastGood == Long.MIN_VALUE) {
+                base = raw; // fresh lock: nothing to smooth from
+            } else {
+                double prev = base + TurretTrack.normalize(baseHeading - histHeading[i]); // old target, moved to this frame's heading
+                base = prev + SMOOTHING * (raw - prev);
+            }
             baseHeading = histHeading[i];
             lastGood = now;
         }
@@ -90,13 +99,22 @@ public class TurretLimelight {
             mode = seeing ? Mode.CAMERA : Mode.GRACE;
             turret.setDeadband(deadband);
             // Robot turned left by d since the picture -> turret turns right by d to stay on the target
-            turret.aimAt(base + wrap(baseHeading - heading)); // clamps to the soft limits
+            turret.aimAt(base + TurretTrack.normalize(baseHeading - heading)); // clamps to the soft limits
         } else {
             mode = Mode.ODOMETRY;
             lastGood = Long.MIN_VALUE;
             turret.setDeadband(TurretTrack.DEADBAND_DEG);
             turret.update(robot, true); // odometry aim, soft limits inside TurretTrack
         }
+    }
+
+    /** Driver open-loop power (+ = left). Soft limits and the encoder-fault stop still apply (TurretTrack.manual). */
+    public void manual(double p) {
+        mode = Mode.MANUAL;
+        lastGood = Long.MIN_VALUE;
+        seeing = false;
+        histCount = 0; // history isn't recorded here, so drop it: a camera lock after manual must not use stale angles
+        turret.manual(p);
     }
 
     /** Degrees to turn right so the shooter, not the camera, points at the tags, at this distance (in) to the goal. */
@@ -119,18 +137,13 @@ public class TurretLimelight {
         return i;
     }
 
-    private static double wrap(double deg) {
-        deg %= 360;
-        if (deg > 180) deg -= 360;
-        if (deg < -180) deg += 360;
-        return deg;
-    }
-
     public Mode getMode() { return mode; }
     /** Last camera-to-shooter correction (deg, turret turned right by this). */
     public double getShooterOffsetDeg() { return offsetDeg; }
     /** Aim table at this pose: {aim correction deg, shooter tx deg, expected ty deg}. */
     public double[] aimTable(Pose robot) { return turret.aimTable(robot); }
+    /** Measured aim correction at this pose (deg, + = left), added in both camera and odometry modes. */
+    public double getAimCorrection(Pose robot) { return turret.aimCorrection(robot); }
     public TurretTrack.Alliance getAlliance() { return turret.getAlliance(); }
     public double getAngleDeg() { return turret.getAngleDeg(); }
     public double getTarget() { return turret.getTarget(); } // after the soft-limit clamp

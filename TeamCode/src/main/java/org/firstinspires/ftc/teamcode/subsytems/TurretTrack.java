@@ -17,10 +17,10 @@ public class TurretTrack {
         // start pose (x, y, heading deg), {goal on the 3-nectar side, other goal}, aim table rows at goals[0]
         // Rows: {pivot x, pivot y, turret field angle deg, shooter tx deg, ty deg}, pasted from Aim Table Tuner.
         // placeholder: replace with Aim Table Tuner rows (straight on + corner, from the old cornerAimX 75 / 67.5; ty unknown)
-        BLUE(new Pose(133, 133.3, Math.toRadians(270)), new double[][]{{84.1, 90}, {84.1, 51.75}}, new double[][]{
+        BLUE(new Pose(133.6, 132, Math.toRadians(270)), new double[][]{{84.1, 90}, {84.1, 51.75}}, new double[][]{
                 {84.1, 133.3, -90, 0, 0},
                 {133, 133.3, -143.26, 4.78, 0}}),
-        RED(new Pose(8.3, 8.4, Math.toRadians(90)), new double[][]{{58, 51.75}, {58, 90}}, new double[][]{
+        RED(new Pose(10.4, 12, Math.toRadians(90)), new double[][]{{58, 51.75}, {58, 90}}, new double[][]{
                 {58, 8.4, 90, 0, 0},
                 {8.3, 8.4, 36.21, 4.88, 0}});
 
@@ -44,6 +44,22 @@ public class TurretTrack {
         }
     }
 
+    // Measured on robot 2026-11-25 (red, heading 90, turret moved by hand): turret deg each shot needs, rows by AIM_YS.
+    // (34.4, 36) and (60, 36) can't be reached at shooter velocity 1100. Blue uses the point mirror (144 - x, 144 - y).
+    public static final double[] AIM_XS = {10.4, 34.4, 60};
+    public static final double[] AIM_YS = {12, 36};
+    public static final double[][] AIM_TURRET_DEG = {{-53.3, -28.2, 0}, {-73, -48.8, 0}};
+    public static final double AIM_HEADING_DEG = 90;
+    public static final double[] AIM_GOAL = Alliance.RED.goals[0]; // what the points were measured against
+    // Measured minus straight at the goal center, deg
+    private static final double[][] AIM_CORR = new double[AIM_YS.length][AIM_XS.length];
+    static {
+        for (int j = 0; j < AIM_YS.length; j++) for (int i = 0; i < AIM_XS.length; i++) {
+            double straight = Math.toDegrees(Math.atan2(AIM_GOAL[1] - AIM_YS[j], AIM_GOAL[0] - AIM_XS[i]));
+            AIM_CORR[j][i] = normalize(AIM_TURRET_DEG[j][i] + AIM_HEADING_DEG - straight);
+        }
+    }
+
     // CONFIRM: servos face each other, so one is reversed. + power must turn the turret left.
     public static final boolean LEFT_REVERSED = true;  // L2 (-0.5) turned turret left
     public static final boolean RIGHT_REVERSED = true; // R1 (+0.5) turned turret right
@@ -53,9 +69,9 @@ public class TurretTrack {
     public static final double ENCODER_TICKS_PER_REV = 8192;
     public static final double GEAR_RATIO = 2;
     public static final double TICKS_PER_DEGREE = ENCODER_TICKS_PER_REV * GEAR_RATIO / 360;
-    // Soft limits: protect the turret wiring (no slip ring). Set by the team: 190 deg right, 110 deg left.
-    public static final double MIN_DEGREE = -190; // right
-    public static final double MAX_DEGREE = 110;  // left
+    // Soft limits: protect the turret wiring (no slip ring). Set by the team: 205 deg right, 130 deg left (confirmed 2026-11-25).
+    public static final double MIN_DEGREE = -205; // right
+    public static final double MAX_DEGREE = 130;  // left
     public static final double TURRET_ZERO_OFFSET = 0;  // deg, if "forward" at zeroing isn't truly forward
     public static final double TURRET_OFFSET_X = 0;     // in, pivot forward of the tracking center
     public static final double TURRET_OFFSET_Y = 0;     // in, pivot left of the tracking center
@@ -114,15 +130,20 @@ public class TurretTrack {
     /** track = aim at the nearest goal, otherwise hold forward. Call every loop. */
     public void update(Pose robot, boolean track) {
         readAngle();
-        double h = robot.heading();
-        double[] pivot = pivot(robot);
-        double px = pivot[0], py = pivot[1];
-
-        double[] g = alliance.goals[pickGoal(robot)];
-        double fieldAngle = Math.atan2(g[1] - py, g[0] - px) + Math.toRadians(aimTable(robot)[0]);
-        fieldAngleDeg = Math.toDegrees(fieldAngle);
-        target = track ? reachable(normalize(Math.toDegrees(fieldAngle - h) - TURRET_ZERO_OFFSET)) : 0;
+        double aim = aimAngle(robot);
+        target = track ? reachable(aim) : 0;
         runPd();
+    }
+
+    /**
+     * Turret angle (deg, -180..180, before soft limits) that aims at the nearest goal from this pose: goal center plus
+     * the measured correction. Aim table on hold, not used for aiming. Never moves the turret.
+     */
+    public double aimAngle(Pose robot) {
+        double[] p = pivot(robot);
+        double[] g = alliance.goals[pickGoal(robot)];
+        fieldAngleDeg = Math.toDegrees(Math.atan2(g[1] - p[1], g[0] - p[0])) + aimCorrection(robot);
+        return normalize(fieldAngleDeg - Math.toDegrees(robot.heading()) - TURRET_ZERO_OFFSET);
     }
 
     /** Index into the alliance goals (0 = 3-nectar goal) of the nearer goal, with hysteresis so it doesn't flicker. */
@@ -151,6 +172,34 @@ public class TurretTrack {
         double span = hi[0] - lo[0];
         double t = span > 0 ? Math.max(0, Math.min(1, (a - lo[0]) / span)) : 0;
         return new double[]{m * (lo[1] + t * (hi[1] - lo[1])), m * (lo[2] + t * (hi[2] - lo[2])), lo[3] + t * (hi[3] - lo[3])};
+    }
+
+    /**
+     * Deg to add to the straight-at-goal aim, bilinear in the measured grid (ends held), for the goal from the last
+     * pickGoal(). 0 for goals[1] (not measured). The 180 deg point mirror keeps CCW angles, so blue uses the same sign.
+     */
+    public double aimCorrection(Pose robot) {
+        if (goal != 0) return 0;
+        double[] p = pivot(robot);
+        boolean blue = alliance == Alliance.BLUE;
+        double x = blue ? 144 - p[0] : p[0], y = blue ? 144 - p[1] : p[1];
+        int i = cell(AIM_XS, x), j = cell(AIM_YS, y);
+        double tx = frac(AIM_XS, i, x), ty = frac(AIM_YS, j, y);
+        double lo = AIM_CORR[j][i] + tx * (AIM_CORR[j][i + 1] - AIM_CORR[j][i]);
+        double hi = AIM_CORR[j + 1][i] + tx * (AIM_CORR[j + 1][i + 1] - AIM_CORR[j + 1][i]);
+        return lo + ty * (hi - lo);
+    }
+
+    // Lower index of the grid cell holding v (first / last cell past the ends)
+    private static int cell(double[] a, double v) {
+        int i = 0;
+        while (i < a.length - 2 && v > a[i + 1]) i++;
+        return i;
+    }
+
+    // Position of v in cell i, 0..1 (clamped, so ends are held)
+    private static double frac(double[] a, int i, double v) {
+        return Math.max(0, Math.min(1, (v - a[i]) / (a[i + 1] - a[i])));
     }
 
     /** Signed lean (rad) from (x, y) to goal g: + = goal to +x. 0 = straight on. */
