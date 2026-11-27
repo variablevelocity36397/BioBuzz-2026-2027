@@ -160,6 +160,11 @@ public class BlueYesNectarSolo extends OpMode {
         follower.update();
         updateStateMachine();
         turret.update(follower.pose(), true); // tracks the whole auto; soft limits apply inside
+        Pose fix = turret.consumePoseCorrection(); // camera-based odometry drift fix (off unless enabled)
+        if (fix != null) {
+            Pose p = follower.pose();
+            follower.setPose(new Pose(p.x() + fix.x(), p.y() + fix.y(), p.heading()));
+        }
         shooter.update();
         transfer.update();
         intake1.update();

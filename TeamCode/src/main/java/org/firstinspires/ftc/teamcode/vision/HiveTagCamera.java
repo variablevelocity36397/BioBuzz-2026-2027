@@ -5,7 +5,14 @@ import com.qualcomm.hardware.limelightvision.LLResultTypes;
 import com.qualcomm.hardware.limelightvision.Limelight3A;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-/** Limelight hive-tag finder. Picks our alliance's cell and reports the average tx/ty of its visible tags. */
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.Pose3D;
+
+/**
+ * Limelight hive-tag finder. Picks our alliance's cell and reports the average tx/ty of its visible tags.
+ * Also reports the camera's own field pose (MegaTag1 botpose) for correcting odometry drift, see VisionPose.
+ */
 public class HiveTagCamera {
     public static final int PIPELINE = 6;
     // BIOBUZZ hive tags: red cells 30-33, 34-37; blue cells 38-41, 42-45
@@ -18,6 +25,9 @@ public class HiveTagCamera {
     private long frameAgeMs;
     private int tagCount;
     private double lastFrameTime = Double.NaN;
+    private boolean fieldPoseValid;
+    private double fieldX, fieldY, fieldYawDeg; // camera pose in the Limelight field frame (m, deg)
+    private int fieldTagCount;
 
     public HiveTagCamera(HardwareMap hw) {
         limelight = hw.get(Limelight3A.class, "limelight");
@@ -39,6 +49,17 @@ public class HiveTagCamera {
         lastFrameTime = result.getTimestamp();
         // How long ago the picture was taken: exposure + processing + time since it reached the hub
         latencyMs = frameAgeMs + result.getCaptureLatency() + result.getTargetingLatency();
+
+        // Uses every tag the Limelight saw, not just the aimed cell. Needs the field map uploaded to the Limelight.
+        fieldPoseValid = false;
+        fieldTagCount = result.isValid() ? result.getBotposeTagCount() : 0;
+        Pose3D botpose = fieldTagCount > 0 ? result.getBotpose() : null;
+        if (botpose != null) {
+            fieldX = botpose.getPosition().toUnit(DistanceUnit.METER).x;
+            fieldY = botpose.getPosition().toUnit(DistanceUnit.METER).y;
+            fieldYawDeg = botpose.getOrientation().getYaw(AngleUnit.DEGREES);
+            fieldPoseValid = true;
+        }
 
         int first = red ? FIRST_TAG : FIRST_TAG + 2 * TAGS_PER_CELL; // each alliance has 2 cells
         int[] count = new int[2];
@@ -89,4 +110,12 @@ public class HiveTagCamera {
     public long getFrameAgeMs() { return frameAgeMs; }
     /** How long ago the latest frame's picture was taken (ms). */
     public double getLatencyMs() { return latencyMs; }
+    /** The latest new frame gave a camera field pose. */
+    public boolean hasFieldPose() { return fieldPoseValid; }
+    /** Camera field pose from the latest new frame: x, y (m) and yaw (deg), Limelight field frame. */
+    public double getFieldX() { return fieldX; }
+    public double getFieldY() { return fieldY; }
+    public double getFieldYawDeg() { return fieldYawDeg; }
+    /** Tags (all, any cell) behind the field pose. More tags = a steadier pose. */
+    public int getFieldTagCount() { return fieldTagCount; }
 }

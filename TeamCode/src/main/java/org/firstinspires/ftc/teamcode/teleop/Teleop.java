@@ -98,6 +98,7 @@ public class Teleop extends OpMode {
     public void start() {
         localizer.setPose(turret.getAlliance().start);
         turret.zero();
+        turret.poseWasReset();
     }
 
     @SuppressLint("DefaultLocale")
@@ -148,14 +149,20 @@ public class Teleop extends OpMode {
             turret.zero(); // current position = forward; soft limits now count from here
         }
         // Odometry reset with the robot parked in the garden
-        if (gamepad2.dpadDownWasPressed()) localizer.setPose(RED_GARDEN);
-        if (gamepad2.dpadUpWasPressed()) localizer.setPose(BLUE_GARDEN);
+        if (gamepad2.dpadDownWasPressed()) { localizer.setPose(RED_GARDEN); turret.poseWasReset(); }
+        if (gamepad2.dpadUpWasPressed()) { localizer.setPose(BLUE_GARDEN); turret.poseWasReset(); }
         localizer.update();
         Pose pose = localizer.state().pose();
         if (turretManual) {
             turret.manual((gamepad2.left_bumper ? MANUAL_TURRET_POWER : 0) - (gamepad2.right_bumper ? MANUAL_TURRET_POWER : 0));
         } else {
             turret.update(pose, turretTracking);
+        }
+        // Camera field pose nudges odometry back toward the tags (off by default, see TurretLimelight.POSE_CORRECTION_ENABLED)
+        Pose fix = turret.consumePoseCorrection();
+        if (fix != null) {
+            pose = new Pose(pose.x() + fix.x(), pose.y() + fix.y(), pose.heading());
+            localizer.setPose(pose);
         }
         if (shotStarted) {
             shotStarted = false;
@@ -214,6 +221,10 @@ public class Teleop extends OpMode {
                 shotModes, shotMaxError, shotMinTags);
         telemetry.addData("Robot pose x / y / heading (deg)", "%.1f / %.1f / %.1f", pose.x(), pose.y(), Math.toDegrees(pose.heading()));
         telemetry.addData("Aim correction (deg)", "%.1f", turret.getAimCorrection(pose));
+        Pose vp = turret.getVisionPose();
+        telemetry.addData("Vision pose fix", vp == null ? "no frame" : String.format("%s dx %.1f dy %.1f dh %.1f %s",
+                turret.isVisionAccepted() ? "ok" : "REJECTED", turret.getVisionDx(), turret.getVisionDy(),
+                turret.getVisionHeadingError(), turret.isPoseCorrection() ? "(applied)" : "(off)"));
         telemetry.addData("Turret angle / target (deg)", "%.1f / %.1f", turret.getAngleDeg(), turret.getTarget());
         telemetry.update();
     }
