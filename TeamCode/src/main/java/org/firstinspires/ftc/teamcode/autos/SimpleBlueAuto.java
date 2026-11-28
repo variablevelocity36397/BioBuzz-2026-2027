@@ -8,17 +8,15 @@ import com.pedropathing.math.Pose;
 import com.pedropathing.paths.Path;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
-import com.qualcomm.robotcore.hardware.DcMotor;
-import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.teamcode.pedro.Constants;
-import org.firstinspires.ftc.teamcode.subsytems.MotorToggle;
+import org.firstinspires.ftc.teamcode.subsytems.Intake;
 import org.firstinspires.ftc.teamcode.subsytems.Shooter;
+import org.firstinspires.ftc.teamcode.subsytems.Transfer;
 
-@Autonomous(name = "AutoPath", group = "Autonomous")
+@Autonomous(name = "SimpleBlueAuto", group = "Autonomous")
 public class SimpleBlueAuto extends OpMode {
 
     private enum State { SPIN_UP, FEED, GARDEN, PARK, DONE }
@@ -33,9 +31,8 @@ public class SimpleBlueAuto extends OpMode {
 
     private Follower follower;
     private Shooter shooter;
-    private MotorToggle transfer;
-    private MotorToggle intake1;
-    private MotorToggle intake2;
+    private Transfer transfer;
+    private Intake intake;
     private Servo adjustableIntake;
     private final ElapsedTime transferTimer = new ElapsedTime();
     private final ElapsedTime spinUpTimer = new ElapsedTime();
@@ -57,7 +54,7 @@ public class SimpleBlueAuto extends OpMode {
             case FEED:    transfer.set(true); transferTimer.reset(); break;
             case GARDEN:  follower.follow(garden()); break;
             case PARK:    follower.follow(park());   break;
-            case DONE:    shooter.set(false); transfer.set(false); intake1.set(false); intake2.set(false); break;
+            case DONE:    shooter.set(false); transfer.set(false); intake.set(false); break;
         }
     }
 
@@ -88,16 +85,9 @@ public class SimpleBlueAuto extends OpMode {
         follower.setPose(start);
         follower.update();
 
-        DcMotorEx shooterMotor = hardwareMap.get(DcMotorEx.class, "shooter");
-        shooterMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        shooter = new Shooter(shooterMotor, SHOOTER_VELOCITY, 0); // fixed velocity, no step
-        DcMotor transferMotor = hardwareMap.get(DcMotor.class, "transfer");
-        transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        transfer = new MotorToggle(transferMotor, TRANSFER_POWER);
-        DcMotor intake1Motor = hardwareMap.get(DcMotor.class, "intake1");
-        intake1Motor.setDirection(DcMotorSimple.Direction.REVERSE);
-        intake1 = new MotorToggle(intake1Motor);
-        intake2 = new MotorToggle(hardwareMap.get(DcMotor.class, "intake2"));
+        shooter = new Shooter(hardwareMap, SHOOTER_VELOCITY, 0); // fixed velocity, no step
+        transfer = new Transfer(hardwareMap, TRANSFER_POWER);
+        intake = new Intake(hardwareMap);
         adjustableIntake = hardwareMap.get(Servo.class, "adjustableintake");
     }
 
@@ -105,8 +95,7 @@ public class SimpleBlueAuto extends OpMode {
     public void start() {
         adjustableIntake.setPosition(ADJUSTABLE_INTAKE_START);
         shooter.set(true);
-        intake1.set(true);
-        intake2.set(true);
+        intake.set(true);
         setState(State.SPIN_UP);
     }
 
@@ -117,8 +106,7 @@ public class SimpleBlueAuto extends OpMode {
         updateShooting();
         shooter.update();
         transfer.update();
-        intake1.update();
-        intake2.update();
+        intake.update();
 
         telemetry.addData("state", state);
         telemetry.addData("shooter velocity", shooter.getActualVelocity());

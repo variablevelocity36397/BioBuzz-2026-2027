@@ -13,7 +13,7 @@ public class HiveTagCamera {
     public static final int TAGS_PER_CELL = 4;
 
     private final Limelight3A limelight;
-    private double tx, ty, txMin, txMax, targetArea, latencyMs;
+    private double tx, ty, targetArea, latencyMs;
     private String tagIds = "";
     private long frameAgeMs;
     private int tagCount;
@@ -44,7 +44,6 @@ public class HiveTagCamera {
         int[] count = new int[2];
         double[] sumTx = new double[2], sumTy = new double[2], area = new double[2];
         String[] ids = {"", ""};
-        double min = Double.MAX_VALUE, max = -Double.MAX_VALUE; // tx range of the given cell's tags
         if (result.isValid()) {
             for (LLResultTypes.FiducialResult tag : result.getFiducialResults()) {
                 int id = tag.getFiducialId();
@@ -55,31 +54,22 @@ public class HiveTagCamera {
                 sumTy[c] += tag.getTargetYDegrees();
                 ids[c] += id + " ";
                 area[c] += tag.getTargetArea();
-                if (c == cell) {
-                    min = Math.min(min, tag.getTargetXDegrees());
-                    max = Math.max(max, tag.getTargetXDegrees());
-                }
             }
         }
         tagCount = count[cell];
         tagIds = ids[cell];
         targetArea = area[cell];
         if (!hasTarget()) {
-            tx = ty = txMin = txMax = 0; // don't show a stale tx
+            tx = ty = 0; // don't show a stale tx
         } else {
             tx = sumTx[cell] / count[cell];
             ty = sumTy[cell] / count[cell];
-            txMin = min;
-            txMax = max;
         }
         return true;
     }
 
     public boolean hasTarget() { return tagCount > 0; }
     public double getTx() { return tx; }
-    /** Smallest and largest tx of the cell's visible tags (one tag: both equal its tx). */
-    public double getTxMin() { return txMin; }
-    public double getTxMax() { return txMax; }
     public double getTy() { return ty; }
     public int getTagCount() { return tagCount; }
     /** IDs of the tags seen in the cell being aimed at. */

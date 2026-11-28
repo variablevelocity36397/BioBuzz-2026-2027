@@ -17,11 +17,10 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
 /**
- * UNTUNED. Retune order: MecanumTuner -> paste drivetrainConfig, PinpointTuner -> paste localizerConfig (replaces the
- * placeholder below), ForesightTuner -> paste foresightConfig. Then re-enable the tuners in Tuning and restore create().
+ * Pedro config, tuned on the robot. Retune order: MecanumTuner -> paste drivetrainConfig, PinpointTuner -> paste
+ * localizerConfig, ForesightTuner -> paste foresightConfig.
  */
 public class Constants {
-    // UNTUNED placeholder (device name only) so TeleOp and the turret tests still build and the tuners can be installed.
     public static MecanumConfig drivetrainConfig = new MecanumConfig(c -> {
         c.frontLeftName.set("flwheel");
         c.frontRightName.set("frwheel");

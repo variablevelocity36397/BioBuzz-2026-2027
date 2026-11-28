@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.tuners;
+package org.firstinspires.ftc.teamcode.tuning;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;

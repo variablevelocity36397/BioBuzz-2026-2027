@@ -8,39 +8,24 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 /**
- * Turret on 2 continuous servos, aimed at the nearest alliance goal from the odometry pose.
+ * Turret on 2 continuous servos (wooden robot), aimed at the nearest alliance goal from the odometry pose.
+ * A motor-driven turret (metal robot) can reuse all of this through the protected constructor; only hardware and
+ * tuned values differ.
  * Angle comes from a Through Bore encoder on the brwheel port. 0 deg = forward, + = left (CCW from above).
  * Field frame = Pedro (inches, heading CCW from +X, radians in Pose).
  */
 public class TurretTrack {
     public enum Alliance {
-        // start pose (x, y, heading deg), {goal on the 3-nectar side, other goal}, aim table rows at goals[0]
-        // Rows: {pivot x, pivot y, turret field angle deg, shooter tx deg, ty deg}, pasted from Aim Table Tuner.
-        // placeholder: replace with Aim Table Tuner rows (straight on + corner, from the old cornerAimX 75 / 67.5; ty unknown)
-        BLUE(new Pose(133.6, 132, Math.toRadians(270)), new double[][]{{84.1, 90}, {84.1, 51.75}}, new double[][]{
-                {84.1, 133.3, -90, 0, 0},
-                {133, 133.3, -143.26, 4.78, 0}}),
-        RED(new Pose(10.4, 12, Math.toRadians(90)), new double[][]{{58, 51.75}, {58, 90}}, new double[][]{
-                {58, 8.4, 90, 0, 0},
-                {8.3, 8.4, 36.21, 4.88, 0}});
+        // start pose (x, y, heading deg), {goal on the 3-nectar side, other goal}
+        BLUE(new Pose(133.6, 132, Math.toRadians(270)), new double[][]{{84.1, 90}, {84.1, 51.75}}),
+        RED(new Pose(10.4, 12, Math.toRadians(90)), new double[][]{{58, 51.75}, {58, 90}});
 
         public final Pose start;
         final double[][] goals;
-        // Sorted by lean: {|lean| rad, aim correction deg, shooter tx deg, ty deg}, mirrored to lean >= 0, goal above
-        final double[][] table;
 
-        Alliance(Pose start, double[][] goals, double[][] rows) {
+        Alliance(Pose start, double[][] goals) {
             this.start = start;
             this.goals = goals;
-            double[] g = goals[0];
-            table = new double[rows.length][];
-            for (int i = 0; i < rows.length; i++) {
-                double[] r = rows[i];
-                double lean = lean(g, r[0], r[1]), m = mirror(lean, g[1] - r[1]);
-                double corr = normalize(r[2] - Math.toDegrees(Math.atan2(g[1] - r[1], g[0] - r[0])));
-                table[i] = new double[]{Math.abs(lean), m * corr, m * r[3], r[4]};
-            }
-            java.util.Arrays.sort(table, (a, b) -> Double.compare(a[0], b[0]));
         }
     }
 
@@ -51,6 +36,11 @@ public class TurretTrack {
     public static final double[][] AIM_TURRET_DEG = {{-53.3, -28.2, 0}, {-73, -48.8, 0}};
     public static final double AIM_HEADING_DEG = 90;
     public static final double[] AIM_GOAL = Alliance.RED.goals[0]; // what the points were measured against
+    // Far goal (goals[1]) has no measured grid: the near grid is mirrored top to bottom about the midpoint between the
+    // goals (y = 12 -> 129.75, 36 -> 105.75), heading 90 -> 270, and the turn flipped (-1). Untested: if far shots
+    // miss by about the same amount on the other side, set +1.
+    public static final double FAR_GOAL_Y = Alliance.RED.goals[1][1];
+    public static final double FAR_GOAL_SIGN = -1;
     // Measured minus straight at the goal center, deg
     private static final double[][] AIM_CORR = new double[AIM_YS.length][AIM_XS.length];
     static {
@@ -84,25 +74,45 @@ public class TurretTrack {
     public static final double ENCODER_JUMP_DEG = 30;
     public static final double GOAL_SWITCH_HYSTERESIS = 3; // in, other goal must be this much closer to switch
 
-    private final CRServoImplEx left, right;
-    private final DcMotor encoder; // brwheel drive motor: only its encoder is read here, never set power
+    private final DcMotorSimple[] outputs; // all get the same power (+ = left)
+    private final DcMotor encoder; // wooden: brwheel drive motor, only its encoder is read here, never set power
+    private final boolean encoderReversed;
+    private final double ticksPerDegree, minDegree, maxDegree; // per robot, minDegree/maxDegree = soft limits
     private final ElapsedTime dt = new ElapsedTime();
     private Alliance alliance = Alliance.BLUE;
     private int goal; // index into alliance.goals
-    private double kp = KP, kd = KD, minPower = MIN_POWER, maxPower = MAX_POWER, deadband = DEADBAND_DEG;
-    private boolean softLimits = true; // only TurretTuner turns these off (wiring removed for tuning)
+    private final double minPower, maxPower;
+    private double kp, kd, deadband = DEADBAND_DEG;
     private double angle, target, error, lastError, power, fieldAngleDeg;
     private boolean atLimit, encoderFault, hasAngle;
 
+    /** Wooden robot: 2 continuous servos. */
     public TurretTrack(HardwareMap hw) {
-        left = hw.get(CRServoImplEx.class, "turretleft");
-        right = hw.get(CRServoImplEx.class, "turretright");
-        left.setDirection(LEFT_REVERSED ? DcMotorSimple.Direction.REVERSE : DcMotorSimple.Direction.FORWARD);
-        right.setDirection(RIGHT_REVERSED ? DcMotorSimple.Direction.REVERSE : DcMotorSimple.Direction.FORWARD);
-        encoder = hw.get(DcMotor.class, "brwheel");
-        // No signal until zero(): a 0-power pulse can still move the servos during init
-        left.setPwmDisable();
-        right.setPwmDisable();
+        this(hw.get(DcMotor.class, "brwheel"), ENCODER_REVERSED, TICKS_PER_DEGREE, MIN_DEGREE, MAX_DEGREE,
+                KP, KD, MIN_POWER, MAX_POWER, servo(hw, "turretleft", LEFT_REVERSED), servo(hw, "turretright", RIGHT_REVERSED));
+    }
+
+    /** Any turret drive: outputs get the same power, + must turn the turret left. Limits in deg (+ = left). */
+    protected TurretTrack(DcMotor encoder, boolean encoderReversed, double ticksPerDegree, double minDegree,
+                          double maxDegree, double kp, double kd, double minPower, double maxPower,
+                          DcMotorSimple... outputs) {
+        this.encoder = encoder;
+        this.encoderReversed = encoderReversed;
+        this.ticksPerDegree = ticksPerDegree;
+        this.minDegree = minDegree;
+        this.maxDegree = maxDegree;
+        this.kp = kp;
+        this.kd = kd;
+        this.minPower = minPower;
+        this.maxPower = maxPower;
+        this.outputs = outputs;
+    }
+
+    private static CRServoImplEx servo(HardwareMap hw, String name, boolean reversed) {
+        CRServoImplEx s = hw.get(CRServoImplEx.class, name);
+        s.setDirection(reversed ? DcMotorSimple.Direction.REVERSE : DcMotorSimple.Direction.FORWARD);
+        s.setPwmDisable(); // No signal until zero(): a 0-power pulse can still move the servos during init
+        return s;
     }
 
     /** Call at start() with the turret pointed straight forward by hand: 0 ticks = 0 deg. */
@@ -111,8 +121,7 @@ public class TurretTrack {
         lastError = 0;
         dt.reset();
         setPower(0);
-        left.setPwmEnable();
-        right.setPwmEnable();
+        for (DcMotorSimple o : outputs) if (o instanceof CRServoImplEx) ((CRServoImplEx) o).setPwmEnable();
     }
 
     /** Current turret position = 0 deg. Servos stay as they are (unpowered in init). */
@@ -137,7 +146,7 @@ public class TurretTrack {
 
     /**
      * Turret angle (deg, -180..180, before soft limits) that aims at the nearest goal from this pose: goal center plus
-     * the measured correction. Aim table on hold, not used for aiming. Never moves the turret.
+     * the measured correction. Never moves the turret.
      */
     public double aimAngle(Pose robot) {
         double[] p = pivot(robot);
@@ -158,31 +167,18 @@ public class TurretTrack {
     }
 
     /**
-     * Aim table interpolated at this pose for the goal from the last pickGoal():
-     * {aim correction deg (added to the angle at the goal center), shooter tx deg (tag tx the camera should hold,
-     * camera offset removed), expected ty deg}. Linear in |lean| between rows, ends held past the table.
-     */
-    public double[] aimTable(Pose robot) {
-        double[] p = pivot(robot), g = alliance.goals[goal];
-        double lean = lean(g, p[0], p[1]), m = mirror(lean, g[1] - p[1]), a = Math.abs(lean);
-        double[][] r = alliance.table;
-        int i = 0;
-        while (i < r.length - 2 && a > r[i + 1][0]) i++;
-        double[] lo = r[i], hi = r[Math.min(i + 1, r.length - 1)];
-        double span = hi[0] - lo[0];
-        double t = span > 0 ? Math.max(0, Math.min(1, (a - lo[0]) / span)) : 0;
-        return new double[]{m * (lo[1] + t * (hi[1] - lo[1])), m * (lo[2] + t * (hi[2] - lo[2])), lo[3] + t * (hi[3] - lo[3])};
-    }
-
-    /**
      * Deg to add to the straight-at-goal aim, bilinear in the measured grid (ends held), for the goal from the last
-     * pickGoal(). 0 for goals[1] (not measured). The 180 deg point mirror keeps CCW angles, so blue uses the same sign.
+     * pickGoal(). goals[1] reuses the grid mirrored (see FAR_GOAL_SIGN). The 180 deg point mirror keeps CCW angles, so blue uses the same sign.
      */
     public double aimCorrection(Pose robot) {
-        if (goal != 0) return 0;
         double[] p = pivot(robot);
         boolean blue = alliance == Alliance.BLUE;
         double x = blue ? 144 - p[0] : p[0], y = blue ? 144 - p[1] : p[1];
+        if (goal != 0) return FAR_GOAL_SIGN * gridCorrection(x, AIM_GOAL[1] + FAR_GOAL_Y - y); // mirror into the measured grid
+        return gridCorrection(x, y);
+    }
+
+    private static double gridCorrection(double x, double y) {
         int i = cell(AIM_XS, x), j = cell(AIM_YS, y);
         double tx = frac(AIM_XS, i, x), ty = frac(AIM_YS, j, y);
         double lo = AIM_CORR[j][i] + tx * (AIM_CORR[j][i + 1] - AIM_CORR[j][i]);
@@ -202,16 +198,6 @@ public class TurretTrack {
         return Math.max(0, Math.min(1, (v - a[i]) / (a[i + 1] - a[i])));
     }
 
-    /** Signed lean (rad) from (x, y) to goal g: + = goal to +x. 0 = straight on. */
-    static double lean(double[] g, double x, double y) {
-        return Math.atan2(g[0] - x, Math.abs(g[1] - y));
-    }
-
-    // Flips aim angles between the 4 mirrored spots (either side of the goal, goal above or below), like the old aim-x shift
-    static double mirror(double lean, double dy) {
-        return (lean >= 0 ? 1 : -1) * (dy >= 0 ? 1 : -1);
-    }
-
     /** Turret pivot in field frame (in). */
     public static double[] pivot(Pose robot) {
         double h = robot.heading();
@@ -227,14 +213,14 @@ public class TurretTrack {
         return d;
     }
 
-    /** PD to a turret angle (deg, + = left), clamped to the soft limits unless disabled. Call every loop. */
+    /** PD to a turret angle (deg, + = left), clamped to the soft limits. Call every loop. */
     public void aimAt(double deg) {
         readAngle();
-        target = softLimits ? Math.max(MIN_DEGREE, Math.min(MAX_DEGREE, deg)) : deg;
+        target = Math.max(minDegree, Math.min(maxDegree, deg));
         runPd();
     }
 
-    /** Open-loop power (+ = left), soft limits applied unless disabled. Call every loop. */
+    /** Open-loop power (+ = left), soft limits applied. Call every loop. */
     public void manual(double p) {
         readAngle();
         setLimitedPower(p);
@@ -265,8 +251,8 @@ public class TurretTrack {
     // Safety: never drive further into a soft limit, and never move with an encoder fault
     private void setLimitedPower(double p) {
         if (encoderFault) p = 0;
-        atLimit = angle >= MAX_DEGREE || angle <= MIN_DEGREE;
-        if (softLimits && ((angle >= MAX_DEGREE && p > 0) || (angle <= MIN_DEGREE && p < 0))) p = 0;
+        atLimit = angle >= maxDegree || angle <= minDegree;
+        if ((angle >= maxDegree && p > 0) || (angle <= minDegree && p < 0)) p = 0;
         setPower(p);
     }
 
@@ -274,10 +260,10 @@ public class TurretTrack {
     private double reachable(double deg) {
         double best = Double.NaN;
         for (double c : new double[]{deg, deg + 360, deg - 360}) {
-            if (c >= MIN_DEGREE && c <= MAX_DEGREE && (Double.isNaN(best) || Math.abs(c - angle) < Math.abs(best - angle))) best = c;
+            if (c >= minDegree && c <= maxDegree && (Double.isNaN(best) || Math.abs(c - angle) < Math.abs(best - angle))) best = c;
         }
         if (!Double.isNaN(best)) return best;
-        return Math.abs(normalize(deg - MIN_DEGREE)) < Math.abs(normalize(deg - MAX_DEGREE)) ? MIN_DEGREE : MAX_DEGREE;
+        return Math.abs(normalize(deg - minDegree)) < Math.abs(normalize(deg - maxDegree)) ? minDegree : maxDegree;
     }
 
     public static double normalize(double deg) {
@@ -289,12 +275,11 @@ public class TurretTrack {
 
     private void setPower(double p) {
         power = p;
-        left.setPower(p);
-        right.setPower(p);
+        for (DcMotorSimple o : outputs) o.setPower(p);
     }
 
     public double getAngleDeg() {
-        return (ENCODER_REVERSED ? -1 : 1) * encoder.getCurrentPosition() / TICKS_PER_DEGREE;
+        return (encoderReversed ? -1 : 1) * encoder.getCurrentPosition() / ticksPerDegree;
     }
 
     public Alliance getAlliance() { return alliance; }
@@ -302,12 +287,8 @@ public class TurretTrack {
     public void setKp(double kp) { this.kp = Math.max(0, kp); }
     public double getKd() { return kd; }
     public void setKd(double kd) { this.kd = Math.max(0, kd); }
-    public void setMinPower(double p) { minPower = Math.max(0, p); }
     public double getDeadband() { return deadband; }
     public void setDeadband(double deg) { deadband = Math.max(0, deg); }
-    public void setMaxPower(double p) { maxPower = Math.max(0, Math.min(1, p)); }
-    /** Tuning only, with the turret wiring removed. Never call from TeleOp or autos. */
-    public void disableSoftLimits() { softLimits = false; }
     public double getTarget() { return target; }
     public double getError() { return error; }
     public double getPower() { return power; }

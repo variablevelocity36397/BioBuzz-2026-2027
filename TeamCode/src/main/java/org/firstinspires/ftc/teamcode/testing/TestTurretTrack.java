@@ -69,7 +69,6 @@ public class TestTurretTrack extends OpMode {
         telemetry.addData("Min power", "%.3f", TurretTrack.MIN_POWER);
         telemetry.addData("Pose (x, y, heading deg)", "%.1f, %.1f, %.1f", pose.x(), pose.y(), Math.toDegrees(pose.heading()));
         telemetry.addData("Goal (x, y)", "%.1f, %.1f", turret.getGoalX(), turret.getGoalY());
-        telemetry.addData("Aim table correction (deg)", "%.1f", turret.aimTable(pose)[0]);
         telemetry.addData("Field angle to goal (deg)", "%.1f", turret.getFieldAngleDeg());
         telemetry.addData("Turret angle (deg)", "%.1f", turret.getAngleDeg());
         telemetry.addData("Turret target (deg)", "%.1f", turret.getTarget());

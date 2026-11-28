@@ -64,8 +64,6 @@ public class TestTurretLimelight extends OpMode {
         telemetry.addData("Tags (count)", "%s(%d)", cam.getTagIds(), cam.getTagCount());
         telemetry.addData("Avg tx / ty (deg)", "%.1f / %.1f", cam.getTx(), cam.getTy());
         telemetry.addData("Area", "%.2f", cam.getTargetArea());
-        double[] table = turret.aimTable(pose);
-        telemetry.addData("Table shooter tx / expected ty (deg)", "%.1f / %.1f", table[1], table[2]);
         telemetry.addData("Shooter offset (deg right)", "%.1f", turret.getShooterOffsetDeg());
         telemetry.addData("Frame age / latency (ms)", "%d / %.0f", cam.getFrameAgeMs(), cam.getLatencyMs());
         telemetry.addData("Turret angle (deg)", "%.1f", turret.getAngleDeg());

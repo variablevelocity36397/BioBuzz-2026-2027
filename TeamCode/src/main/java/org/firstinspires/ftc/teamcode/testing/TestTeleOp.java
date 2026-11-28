@@ -2,15 +2,13 @@ package org.firstinspires.ftc.teamcode.testing;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
-import com.qualcomm.robotcore.hardware.DcMotor;
-import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Servo;
 
 import org.firstinspires.ftc.teamcode.subsytems.MecanumDrive;
 import org.firstinspires.ftc.teamcode.subsytems.MotorToggle;
 import org.firstinspires.ftc.teamcode.subsytems.ServoToggle;
 import org.firstinspires.ftc.teamcode.subsytems.Shooter;
+import org.firstinspires.ftc.teamcode.subsytems.Transfer;
 
 @TeleOp(name = "Test TeleOp", group = "Test")
 public class TestTeleOp extends OpMode {
@@ -27,23 +25,16 @@ public class TestTeleOp extends OpMode {
     private Shooter shooter;
     private MotorToggle intake1;
     private MotorToggle intake2;
-    private MotorToggle transfer;
+    private Transfer transfer;
     private ServoToggle adjustableIntake;
-    private boolean aimOn;
 
     @Override
     public void init() {
         drive = new MecanumDrive(hardwareMap);
-        DcMotorEx shooterMotor = hardwareMap.get(DcMotorEx.class, "shooter");
-        shooterMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        shooter = new Shooter(shooterMotor, SHOOTER_START_VELOCITY, SHOOTER_VELOCITY_STEP);
-        DcMotor intake1Motor = hardwareMap.get(DcMotor.class, "intake1");
-        intake1Motor.setDirection(DcMotorSimple.Direction.REVERSE);
-        intake1 = new MotorToggle(intake1Motor);
-        intake2 = new MotorToggle(hardwareMap.get(DcMotor.class, "intake2"));
-        DcMotor transferMotor = hardwareMap.get(DcMotor.class, "transfer");
-        transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        transfer = new MotorToggle(transferMotor, 0.75);
+        shooter = new Shooter(hardwareMap, SHOOTER_START_VELOCITY, SHOOTER_VELOCITY_STEP);
+        intake1 = new MotorToggle(hardwareMap, "intake1", true, 1);
+        intake2 = new MotorToggle(hardwareMap, "intake2", false, 1);
+        transfer = new Transfer(hardwareMap, 0.75);
         adjustableIntake = new ServoToggle(hardwareMap.get(Servo.class, "adjustableintake"), ADJUSTABLE_INTAKE_OFF, ADJUSTABLE_INTAKE_ON);
     }
 
@@ -61,10 +52,6 @@ public class TestTeleOp extends OpMode {
         if (gamepad1.rightBumperWasPressed()) adjustableIntake.toggle();
         if (gamepad1.dpadUpWasPressed()) shooter.faster();
         if (gamepad1.dpadDownWasPressed()) shooter.slower();
-        if (gamepad1.dpadLeftWasPressed()) aimOn = !aimOn;
-
-        // Turret only moves while auto aim is toggled on
-        //if (aimOn) turret.aim();
 
         shooter.update();
         intake1.update();
@@ -81,10 +68,6 @@ public class TestTeleOp extends OpMode {
         telemetry.addData("Y - intake2", intake2.isOn());
         telemetry.addData("RB - adjustable intake", adjustableIntake.isOn());
         telemetry.addData("DpadUp/Down - shooter velocity", shooter.getVelocity());
-        telemetry.addData("DpadLeft - turret auto aim", aimOn);
-        //telemetry.addData("Turret has target", turret.hasTarget());
-        //telemetry.addData("Turret tx", turret.getTx());
-       // telemetry.addData("Turret angle (deg)", turret.getAngleDeg());
         telemetry.update();
     }
 }

@@ -4,16 +4,14 @@ import com.pedropathing.math.Pose;
 import com.pedropathing.revhub.localizers.PinpointLocalizer;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
-import com.qualcomm.robotcore.hardware.DcMotor;
-import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import com.qualcomm.robotcore.util.Range;
 
 import org.firstinspires.ftc.teamcode.pedro.Constants;
-import org.firstinspires.ftc.teamcode.subsytems.MotorToggle;
+import org.firstinspires.ftc.teamcode.subsytems.Intake;
 import org.firstinspires.ftc.teamcode.subsytems.Shooter;
+import org.firstinspires.ftc.teamcode.subsytems.Transfer;
 import org.firstinspires.ftc.teamcode.subsytems.TurretTrack;
 
 /**
@@ -29,7 +27,8 @@ public class  TestAdjustableIntake extends OpMode {
     private Servo adjustableIntake;
     private double pos = 0.630; // Teleop down (0.635) minus 0.005
     private Shooter shooter;
-    private MotorToggle intake1, intake2, transfer;
+    private Intake intake;
+    private Transfer transfer;
     private final ElapsedTime transferTimer = new ElapsedTime();
     private TurretTrack turret;
     private PinpointLocalizer localizer;
@@ -37,16 +36,9 @@ public class  TestAdjustableIntake extends OpMode {
     @Override
     public void init() {
         adjustableIntake = hardwareMap.get(Servo.class, "adjustableintake");
-        DcMotorEx shooterMotor = hardwareMap.get(DcMotorEx.class, "shooter");
-        shooterMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        shooter = new Shooter(shooterMotor, SHOOTER_VELOCITY, 0);
-        DcMotor intake1Motor = hardwareMap.get(DcMotor.class, "intake1");
-        intake1Motor.setDirection(DcMotorSimple.Direction.REVERSE);
-        intake1 = new MotorToggle(intake1Motor);
-        intake2 = new MotorToggle(hardwareMap.get(DcMotor.class, "intake2"));
-        DcMotor transferMotor = hardwareMap.get(DcMotor.class, "transfer");
-        transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        transfer = new MotorToggle(transferMotor, 0.7);
+        shooter = new Shooter(hardwareMap, SHOOTER_VELOCITY, 0);
+        intake = new Intake(hardwareMap);
+        transfer = new Transfer(hardwareMap, 0.7);
         // Constructor leaves the servos PWM-disabled (slack). zero()/update()/aimAt() would power them, so only the
         // encoder reads and aimAngle() (math only) are used here.
         turret = new TurretTrack(hardwareMap);
@@ -80,10 +72,7 @@ public class  TestAdjustableIntake extends OpMode {
 
         // Same as Teleop, on gamepad2
         if (gamepad2.aWasPressed()) shooter.toggle();
-        if (gamepad2.bWasPressed()) {
-            intake1.toggle();
-            intake2.set(intake1.isOn());
-        }
+        if (gamepad2.bWasPressed()) intake.toggle();
         if (gamepad2.xWasPressed() && shooter.isOn()) {
             transferTimer.reset();
             transfer.set(true);
@@ -91,8 +80,7 @@ public class  TestAdjustableIntake extends OpMode {
         if (transfer.isOn() && (transferTimer.seconds() >= 1 || !shooter.isOn())) transfer.set(false);
 
         shooter.update();
-        intake1.update();
-        intake2.update();
+        intake.update();
         transfer.update();
 
         localizer.update();
@@ -101,7 +89,7 @@ public class  TestAdjustableIntake extends OpMode {
 
         telemetry.addData("GP1 dpad - adjustableintake", "%.3f", pos);
         telemetry.addData("GP2 Cross - shooter", shooter.isOn());
-        telemetry.addData("GP2 Circle - intakes", intake1.isOn());
+        telemetry.addData("GP2 Circle - intakes", intake.isOn());
         telemetry.addData("GP2 Square - transfer (1 s, shooter on)", transfer.isOn());
         telemetry.addData("Shooter actual velocity", "%.1f", shooter.getActualVelocity());
         telemetry.addData("Alliance", turret.getAlliance());

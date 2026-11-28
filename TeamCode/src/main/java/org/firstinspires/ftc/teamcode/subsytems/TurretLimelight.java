@@ -39,8 +39,14 @@ public class TurretLimelight {
     private boolean seeing; // latest frame had usable tags
     private double offsetDeg; // last shooter offset used
 
+    /** Wooden robot (servo turret). */
     public TurretLimelight(HardwareMap hw) {
-        turret = new TurretTrack(hw);
+        this(hw, new TurretTrack(hw));
+    }
+
+    /** Any turret (TurretTrack or a subclass for a motor-driven turret). */
+    public TurretLimelight(HardwareMap hw, TurretTrack turret) {
+        this.turret = turret;
         camera = new HiveTagCamera(hw);
     }
 
@@ -83,7 +89,7 @@ public class TurretLimelight {
         if (newFrame && seeing) {
             // Use where the turret and robot were when the picture was taken, so turning since then isn't counted twice
             int i = lookup(now - (long) (camera.getLatencyMs() * 1e6));
-            // Turn until the shooter points at the tag average (aim table on hold, not used for aiming)
+            // Turn until the shooter points at the tag average
             offsetDeg = shooterOffsetDeg(turret.goalDistance(robot));
             double raw = histAngle[i] + (AIM_SIGN * camera.getTx() - offsetDeg) + turret.aimCorrection(robot);
             if (lastGood == Long.MIN_VALUE) {
@@ -140,8 +146,6 @@ public class TurretLimelight {
     public Mode getMode() { return mode; }
     /** Last camera-to-shooter correction (deg, turret turned right by this). */
     public double getShooterOffsetDeg() { return offsetDeg; }
-    /** Aim table at this pose: {aim correction deg, shooter tx deg, expected ty deg}. */
-    public double[] aimTable(Pose robot) { return turret.aimTable(robot); }
     /** Measured aim correction at this pose (deg, + = left), added in both camera and odometry modes. */
     public double getAimCorrection(Pose robot) { return turret.aimCorrection(robot); }
     public TurretTrack.Alliance getAlliance() { return turret.getAlliance(); }

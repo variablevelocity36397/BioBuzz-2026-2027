@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.vision;
+package org.firstinspires.ftc.teamcode.testing;
 
 import android.util.Size;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
@@ -8,8 +8,10 @@ import com.qualcomm.robotcore.util.Range;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.WhiteBalanceControl;
 import org.firstinspires.ftc.vision.VisionPortal;
+import org.firstinspires.ftc.teamcode.subsytems.MecanumDrive;
+import org.firstinspires.ftc.teamcode.vision.BallDetectionProcessor;
 
-@TeleOp(name = "Ball Tracker and Chase", group = "Vision")
+@TeleOp(name = "Ball Tracker and Chase", group = "Test")
 public class BallChasingProgram extends LinearOpMode {
 
     // =========================================================
@@ -50,8 +52,7 @@ public class BallChasingProgram extends LinearOpMode {
 
     @Override
     public void runOpMode() {
-        MecanumDrive robotDrive = new MecanumDrive();
-        robotDrive.init(hardwareMap);
+        MecanumDrive robotDrive = new MecanumDrive(hardwareMap);
 
         ballDetectionProcessor = new BallDetectionProcessor();
 
@@ -135,7 +136,7 @@ public class BallChasingProgram extends LinearOpMode {
             }
 
             // 5. APPLY POWER TO DRIVETRAIN
-            robotDrive.drive(forwardPower, strafePower, rotatePower);
+            robotDrive.drive(forwardPower, strafePower, rotatePower, 1.0);
 
             telemetry.addData("State", state);
             if (!fresh) telemetry.addData("WARNING", "Stale camera data (%.0f ms)", ball.ageMs());
@@ -145,7 +146,7 @@ public class BallChasingProgram extends LinearOpMode {
             telemetry.addData("Camera FPS", "%.1f", visionPortal.getFps());
             telemetry.update();
         }
-        robotDrive.drive(0.0, 0.0, 0.0);
+        robotDrive.drive(0.0, 0.0, 0.0, 1.0);
         visionPortal.close();
     }
 

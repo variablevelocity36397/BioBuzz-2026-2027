@@ -8,14 +8,12 @@ import com.pedropathing.paths.Path;
 import com.pedropathing.paths.interpolator.Interpolator;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
-import com.qualcomm.robotcore.hardware.DcMotor;
-import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.teamcode.pedro.Constants;
-import org.firstinspires.ftc.teamcode.subsytems.MotorToggle;
+import org.firstinspires.ftc.teamcode.subsytems.Intake;
 import org.firstinspires.ftc.teamcode.subsytems.Shooter;
+import org.firstinspires.ftc.teamcode.subsytems.Transfer;
 import org.firstinspires.ftc.teamcode.subsytems.TurretLimelight;
 import org.firstinspires.ftc.teamcode.subsytems.TurretTrack;
 
@@ -39,9 +37,8 @@ public class BlueYesNectarSolo extends OpMode {
 
     private Follower follower;
     private Shooter shooter;
-    private MotorToggle transfer;
-    private MotorToggle intake1;
-    private MotorToggle intake2;
+    private Transfer transfer;
+    private Intake intake;
     private TurretLimelight turret;
     private final ElapsedTime timer = new ElapsedTime(); // states run one at a time, so one timer covers them all
     private double settledAt; // timer seconds when the shooter first got within tolerance, -1 = not yet
@@ -122,16 +119,9 @@ public class BlueYesNectarSolo extends OpMode {
         follower.setPose(start);
         follower.update();
 
-        DcMotorEx shooterMotor = hardwareMap.get(DcMotorEx.class, "shooter");
-        shooterMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        shooter = new Shooter(shooterMotor, SHOOTER_VELOCITY, 0); // fixed velocity, no step
-        DcMotor transferMotor = hardwareMap.get(DcMotor.class, "transfer");
-        transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        transfer = new MotorToggle(transferMotor, TRANSFER_POWER);
-        DcMotor intake1Motor = hardwareMap.get(DcMotor.class, "intake1");
-        intake1Motor.setDirection(DcMotorSimple.Direction.REVERSE);
-        intake1 = new MotorToggle(intake1Motor);
-        intake2 = new MotorToggle(hardwareMap.get(DcMotor.class, "intake2"));
+        shooter = new Shooter(hardwareMap, SHOOTER_VELOCITY, 0); // fixed velocity, no step
+        transfer = new Transfer(hardwareMap, TRANSFER_POWER);
+        intake = new Intake(hardwareMap);
 
         // Built after the follower: the turret reads the brwheel drive motor's encoder
         turret = new TurretLimelight(hardwareMap); // servos unpowered until start()
@@ -150,8 +140,7 @@ public class BlueYesNectarSolo extends OpMode {
     @Override
     public void start() {
         turret.zero();
-        intake1.set(true); // intakes run the whole auto
-        intake2.set(true);
+        intake.set(true); // intakes run the whole auto
         setState(State.SPIN_UP_1);
     }
 
@@ -162,8 +151,7 @@ public class BlueYesNectarSolo extends OpMode {
         turret.update(follower.pose(), true); // tracks the whole auto; soft limits apply inside
         shooter.update();
         transfer.update();
-        intake1.update();
-        intake2.update();
+        intake.update();
 
         showPose(); // first line so it never scrolls off the Driver Station
         if (turret.isEncoderFault()) telemetry.addLine("!!! TURRET ENCODER FAULT: turret stopped !!!");
@@ -171,7 +159,7 @@ public class BlueYesNectarSolo extends OpMode {
         telemetry.addData("state", state);
         telemetry.addData("shooter velocity", "%.1f", shooter.getActualVelocity());
         telemetry.addData("transfer", transfer.isOn());
-        telemetry.addData("intake", intake1.isOn());
+        telemetry.addData("intake", intake.isOn());
         telemetry.addData("turret mode", turret.getMode());
         telemetry.addData("turret goal (x, y)", "%.1f, %.1f", turret.getGoalX(), turret.getGoalY());
         telemetry.addData("camera tags used", turret.getCamera().getTagIds());

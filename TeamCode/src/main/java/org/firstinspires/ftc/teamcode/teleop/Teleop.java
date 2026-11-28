@@ -4,9 +4,6 @@ import android.annotation.SuppressLint;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
-import com.qualcomm.robotcore.hardware.DcMotor;
-import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.pedropathing.math.Pose;
 import com.pedropathing.revhub.localizers.PinpointLocalizer;
 import com.qualcomm.robotcore.hardware.Servo;
@@ -16,9 +13,10 @@ import java.util.EnumSet;
 
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 import org.firstinspires.ftc.teamcode.subsytems.MecanumDrive;
-import org.firstinspires.ftc.teamcode.subsytems.MotorToggle;
+import org.firstinspires.ftc.teamcode.subsytems.Intake;
 import org.firstinspires.ftc.teamcode.subsytems.ServoToggle;
 import org.firstinspires.ftc.teamcode.subsytems.Shooter;
+import org.firstinspires.ftc.teamcode.subsytems.Transfer;
 import org.firstinspires.ftc.teamcode.subsytems.TurretLimelight;
 import org.firstinspires.ftc.teamcode.subsytems.TurretTrack;
 
@@ -42,9 +40,8 @@ public class Teleop extends OpMode {
     private Shooter shooter;
     private final ElapsedTime spinUpTimer = new ElapsedTime();
     private double spinUpTime = -1; // -1 = not at speed yet
-    private MotorToggle intake1;
-    private MotorToggle intake2;
-    private MotorToggle transfer;
+    private Intake intake;
+    private Transfer transfer;
     private ServoToggle adjustableIntake;
     private PinpointLocalizer localizer;
     private TurretLimelight turret;
@@ -52,7 +49,7 @@ public class Teleop extends OpMode {
     private boolean turretManual;
     private final ElapsedTime trackHold = new ElapsedTime(), zeroHold = new ElapsedTime();
     private boolean trackHoldDone, zeroHoldDone; // each hold fires once
-    ElapsedTime transferTimer = new ElapsedTime();
+    private final ElapsedTime transferTimer = new ElapsedTime();
     // Shot snapshot: taken on the X press, then the whole 1 s transfer is tracked. Held on screen until the next shot.
     private boolean shotStarted;
     private String shotSnapshot = "none yet";
@@ -63,16 +60,9 @@ public class Teleop extends OpMode {
     @Override
     public void init() {
         drive = new MecanumDrive(hardwareMap);
-        DcMotorEx shooterMotor = hardwareMap.get(DcMotorEx.class, "shooter");
-        shooterMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        shooter = new Shooter(shooterMotor, SHOOTER_VELOCITY, 0); // fixed velocity, no step
-        DcMotor intake1Motor = hardwareMap.get(DcMotor.class, "intake1");
-        intake1Motor.setDirection(DcMotorSimple.Direction.REVERSE);
-        intake1 = new MotorToggle(intake1Motor);
-        intake2 = new MotorToggle(hardwareMap.get(DcMotor.class, "intake2"));
-        DcMotor transferMotor = hardwareMap.get(DcMotor.class, "transfer");
-        transferMotor.setDirection(DcMotorSimple.Direction.REVERSE);
-        transfer = new MotorToggle(transferMotor, 0.7);
+        shooter = new Shooter(hardwareMap, SHOOTER_VELOCITY, 0); // fixed velocity, no step
+        intake = new Intake(hardwareMap);
+        transfer = new Transfer(hardwareMap, 0.7);
         // Moves to the start position during init
         adjustableIntake = new ServoToggle(hardwareMap.get(Servo.class, "adjustableintake"),
                 ADJUSTABLE_INTAKE_DOWN, ADJUSTABLE_INTAKE_UP);
@@ -108,19 +98,13 @@ public class Teleop extends OpMode {
         drive.drive(-gamepad1.left_stick_y, gamepad1.left_stick_x, gamepad1.right_stick_x * TURN_SCALE,
                 slowMode ? SLOW_SPEED : 1.0);
 
-
-
-
         if (gamepad1.aWasPressed()) {
             shooter.toggle();
             spinUpTimer.reset();
             spinUpTime = -1;
         }
         // wasPressed() consumes the press, so read it once and drive both intakes together
-        if (gamepad1.bWasPressed()) {
-            intake1.toggle();
-            intake2.set(intake1.isOn());
-        }
+        if (gamepad1.bWasPressed()) intake.toggle();
         // Transfer only runs while the shooter is on
         if (gamepad1.xWasPressed() && shooter.isOn()) {
             transferTimer.reset();
@@ -173,8 +157,7 @@ public class Teleop extends OpMode {
             shotMinTags = Math.min(shotMinTags, turret.getCamera().getTagCount());
         }
         shooter.update();
-        intake1.update();
-        intake2.update();
+        intake.update();
         transfer.update();
         adjustableIntake.update();
 
@@ -183,15 +166,12 @@ public class Teleop extends OpMode {
             spinUpTime = spinUpTimer.seconds();
         }
 
-
-
         telemetry.addData("Left Stick", "drive / strafe");
         telemetry.addData("Right Stick X", "turn (" + TURN_SCALE + ")");
         telemetry.addData("R2 (hold) - slow mode", slowMode);
         telemetry.addData("Cross - shooter", shooter.isOn());
-        telemetry.addData("Circle - intake1", intake1.isOn());
+        telemetry.addData("Circle - intakes", intake.isOn());
         telemetry.addData("Square - transfer", transfer.isOn());
-        telemetry.addData("Circle - intake2", intake2.isOn());
         telemetry.addData("R1 - adjustable intake", adjustableIntake.getPosition());
         telemetry.addData("Shooter target velocity", shooter.getVelocity());
         telemetry.addData("Shooter actual velocity", "%.1f", shooter.getActualVelocity());

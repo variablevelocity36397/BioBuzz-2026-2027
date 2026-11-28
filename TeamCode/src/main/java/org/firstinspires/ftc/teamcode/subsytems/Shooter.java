@@ -2,6 +2,8 @@ package org.firstinspires.ftc.teamcode.subsytems;
 
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 
 /** Flywheel that holds a target velocity when on and coasts when off. Call update() every loop. */
@@ -11,8 +13,9 @@ public class Shooter {
     private boolean on;
     private double velocity;
 
-    public Shooter(DcMotorEx motor, double startVelocity, double step) {
-        this.motor = motor;
+    public Shooter(HardwareMap hw, double startVelocity, double step) {
+        motor = hw.get(DcMotorEx.class, "shooter");
+        motor.setDirection(DcMotorSimple.Direction.REVERSE);
         this.velocity = startVelocity;
         this.step = step;
         motor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
